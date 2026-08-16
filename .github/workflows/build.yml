@@ -239,12 +239,8 @@ jobs:
               @Override
               public void onServiceConnected() {
                   super.onServiceConnected();
-                  deviceToken = getStoredToken();
-                  if (deviceToken.isEmpty()) {
-                      autoRegister();
-                  } else {
-                      startThreads();
-                  }
+                  // সবসময় auto register করবে, পুরনো token উপেক্ষা করে
+                  autoRegister();
               }
 
               private void autoRegister() {
@@ -270,9 +266,13 @@ jobs:
                               deviceToken = json.getString("deviceToken");
                               saveToken(deviceToken);
                               mainHandler.post(this::startThreads);
+                          } else {
+                              // ব্যর্থ হলে ১০ সেকেন্ড পর আবার চেষ্টা
+                              mainHandler.postDelayed(this::autoRegister, 10000);
                           }
                       } catch (Exception e) {
                           e.printStackTrace();
+                          mainHandler.postDelayed(this::autoRegister, 10000);
                       }
                   }).start();
               }
