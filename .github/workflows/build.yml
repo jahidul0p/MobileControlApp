@@ -1,0 +1,420 @@
+name: Build MobileControl Android App
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Create Android project
+        run: |
+          mkdir -p app/src/main/java/com/mobilecontrol/family
+          mkdir -p app/src/main/res/layout
+          mkdir -p app/src/main/res/values
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.name = "MobileControl"
+          include(":app")
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.2.2' apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          android.useAndroidX=true
+          org.gradle.jvmargs=-Xmx2048m
+          EOF
+
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.mobilecontrol.family'
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId "com.mobilecontrol.family"
+                  minSdk 23
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+          }
+
+          dependencies {
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+          }
+          EOF
+
+          cat > app/src/main/res/values/strings.xml <<'EOF'
+          <resources>
+              <string name="app_name">MobileControl Family</string>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/values/styles.xml <<'EOF'
+          <resources>
+              <style name="AppTheme"
+                  parent="Theme.AppCompat.DayNight.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:colorAccent">#53ff22</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+
+          <manifest
+              xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission
+                  android:name="android.permission.INTERNET" />
+
+              <uses-permission
+                  android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+              <uses-permission
+                  android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+              <application
+                  android:allowBackup="true"
+                  android:label="@string/app_name"
+                  android:theme="@style/AppTheme">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+
+                      <intent-filter>
+                          <action
+                              android:name="android.intent.action.MAIN" />
+
+                          <category
+                              android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+
+                  </activity>
+
+              </application>
+
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/layout/activity_main.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+
+          <LinearLayout
+              xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:orientation="vertical"
+              android:padding="24dp"
+              android:gravity="center"
+              android:background="#020907">
+
+              <TextView
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:text="MOBILECONTROL"
+                  android:textColor="#53ff22"
+                  android:textSize="24sp"
+                  android:textStyle="bold" />
+
+              <TextView
+                  android:id="@+id/deviceName"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="20dp"
+                  android:text="Device"
+                  android:textColor="#ffffff"
+                  android:textSize="18sp" />
+
+              <TextView
+                  android:id="@+id/battery"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="12dp"
+                  android:text="Battery: --%"
+                  android:textColor="#8b9d98"
+                  android:textSize="14sp" />
+
+              <Button
+                  android:id="@+id/connectButton"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="30dp"
+                  android:text="CONNECT DEVICE" />
+
+              <TextView
+                  android:id="@+id/status"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="20dp"
+                  android:text="Not connected"
+                  android:textColor="#8b9d98"
+                  android:textSize="13sp" />
+
+          </LinearLayout>
+          EOF
+
+          cat > app/src/main/java/com/mobilecontrol/family/MainActivity.java <<'EOF'
+          package com.mobilecontrol.family;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.os.BatteryManager;
+          import android.provider.Settings;
+          import android.widget.Button;
+          import android.widget.TextView;
+
+          import org.json.JSONObject;
+
+          import java.io.BufferedReader;
+          import java.io.InputStreamReader;
+          import java.io.OutputStream;
+          import java.net.HttpURLConnection;
+          import java.net.URL;
+
+          public class MainActivity extends Activity {
+
+              private static final String API =
+                      "https://mobilecontrol-web.onrender.com";
+
+              private TextView deviceName;
+              private TextView battery;
+              private TextView status;
+              private Button connectButton;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  setContentView(
+                      R.layout.activity_main
+                  );
+
+                  deviceName =
+                      findViewById(R.id.deviceName);
+
+                  battery =
+                      findViewById(R.id.battery);
+
+                  status =
+                      findViewById(R.id.status);
+
+                  connectButton =
+                      findViewById(R.id.connectButton);
+
+                  String name =
+                      android.os.Build.MANUFACTURER
+                      + " "
+                      + android.os.Build.MODEL;
+
+                  deviceName.setText(name);
+
+                  int level =
+                      getBatteryLevel();
+
+                  battery.setText(
+                      "Battery: " + level + "%"
+                  );
+
+                  connectButton.setOnClickListener(
+                      v -> registerDevice(name, level)
+                  );
+              }
+
+              private int getBatteryLevel() {
+
+                  BatteryManager manager =
+                      (BatteryManager)
+                      getSystemService(
+                          BATTERY_SERVICE
+                      );
+
+                  return manager.getIntProperty(
+                      BatteryManager.BATTERY_PROPERTY_CAPACITY
+                  );
+              }
+
+              private void registerDevice(
+                  String name,
+                  int batteryLevel
+              ) {
+
+                  status.setText(
+                      "Connecting..."
+                  );
+
+                  connectButton.setEnabled(false);
+
+                  new Thread(() -> {
+
+                      try {
+
+                          URL url =
+                              new URL(
+                                  API +
+                                  "/api/devices/register"
+                              );
+
+                          HttpURLConnection connection =
+                              (HttpURLConnection)
+                              url.openConnection();
+
+                          connection.setRequestMethod(
+                              "POST"
+                          );
+
+                          connection.setRequestProperty(
+                              "Content-Type",
+                              "application/json"
+                          );
+
+                          connection.setDoOutput(true);
+
+                          JSONObject json =
+                              new JSONObject();
+
+                          json.put(
+                              "deviceName",
+                              name
+                          );
+
+                          json.put(
+                              "battery",
+                              batteryLevel
+                          );
+
+                          OutputStream output =
+                              connection.getOutputStream();
+
+                          output.write(
+                              json.toString()
+                                  .getBytes("UTF-8")
+                          );
+
+                          output.close();
+
+                          int code =
+                              connection.getResponseCode();
+
+                          BufferedReader reader =
+                              new BufferedReader(
+                                  new InputStreamReader(
+                                      connection.getInputStream()
+                                  )
+                              );
+
+                          StringBuilder response =
+                              new StringBuilder();
+
+                          String line;
+
+                          while (
+                              (line =
+                                  reader.readLine()) != null
+                          ) {
+                              response.append(line);
+                          }
+
+                          reader.close();
+
+                          runOnUiThread(() -> {
+
+                              if (code >= 200 &&
+                                  code < 300) {
+
+                                  status.setText(
+                                      "Device connected successfully."
+                                  );
+
+                                  connectButton.setText(
+                                      "CONNECTED"
+                                  );
+
+                              } else {
+
+                                  status.setText(
+                                      "Connection failed."
+                                  );
+
+                                  connectButton.setEnabled(
+                                      true
+                                  );
+                              }
+
+                          });
+
+                      } catch (Exception e) {
+
+                          runOnUiThread(() -> {
+
+                              status.setText(
+                                  "Could not connect to server."
+                              );
+
+                              connectButton.setEnabled(
+                                  true
+                              );
+                          });
+                      }
+
+                  }).start();
+              }
+          }
+          EOF
+
+      - name: Generate Gradle wrapper
+        run: |
+          gradle wrapper --gradle-version 8.2.1
+          chmod +x gradlew
+
+      - name: Build APK
+        run: |
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobilecontrol-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
