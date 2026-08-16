@@ -219,9 +219,9 @@ jobs:
 
               // ========== CONFIG ==========
               private static final String API_BASE = "https://mobilecontrol-web.onrender.com";
-              private static final String OWNER_EMAIL = "your_email@gmail.com"; // <-- তোমার লগইন email
+              private static final String OWNER_EMAIL = "mdfatema03@gmail.com";
               private static final String DEVICE_ID = "child-phone-123";
-              private static final String DEVICE_NAME = Build.MANUFACTURER + " " + Build.MODEL; // or any name
+              private static final String DEVICE_NAME = Build.MANUFACTURER + " " + Build.MODEL;
               private static final String PREFS_NAME = "device_prefs";
               private static final String TOKEN_KEY = "device_token";
               // ============================
