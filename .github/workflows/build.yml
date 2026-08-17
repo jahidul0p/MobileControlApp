@@ -128,7 +128,6 @@ jobs:
                   super.onCreate(savedInstanceState);
                   setContentView(R.layout.activity_main);
 
-                  // Request location permission
                   if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                       ActivityCompat.requestPermissions(this,
                               new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION},
@@ -166,6 +165,7 @@ jobs:
           import android.os.Build;
           import android.os.Handler;
           import android.os.Looper;
+          import android.provider.Settings;
           import android.view.accessibility.AccessibilityEvent;
           import android.view.accessibility.AccessibilityNodeInfo;
           import org.json.JSONArray;
@@ -215,7 +215,11 @@ jobs:
                   deviceToken = prefs.getString(DEVICE_TOKEN_KEY, null);
 
                   if (deviceId == null || deviceId.isEmpty()) {
-                      deviceId = "device-" + UUID.randomUUID().toString();
+                      String androidId = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
+                      if (androidId == null || androidId.isEmpty()) {
+                          androidId = UUID.randomUUID().toString();
+                      }
+                      deviceId = "device-" + androidId;
                       prefs.edit().putString(DEVICE_ID_KEY, deviceId).apply();
                   }
 
