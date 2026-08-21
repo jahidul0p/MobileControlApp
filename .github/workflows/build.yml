@@ -619,10 +619,10 @@ jobs:
                   if (source != null) {
                       // Try source node first
                       clickedText = getNodeText(source);
-                      // If empty, search parent chain for button text
+                      // If empty, search parent chain for button text or viewIdResourceName
                       AccessibilityNodeInfo parent = source.getParent();
                       int depth = 0;
-                      while (parent != null && depth < 5) {
+                      while (parent != null && depth < 6) {
                           String parentText = getNodeText(parent);
                           if (!parentText.isEmpty() && isActionText(parentText)) {
                               clickedText = parentText;
@@ -656,6 +656,9 @@ jobs:
                       if (text.isEmpty() && node.getContentDescription() != null) {
                           text = node.getContentDescription().toString();
                       }
+                      if (text.isEmpty() && node.getViewIdResourceName() != null) {
+                          text = node.getViewIdResourceName();
+                      }
                       return text.trim();
                   } catch (Exception e) {
                       return "";
@@ -671,7 +674,8 @@ jobs:
                          lower.contains("enter") ||
                          lower.contains("done") ||
                          lower.contains("next") ||
-                         lower.contains("send message");
+                         lower.contains("➤") ||
+                         lower.contains("arrow");
               }
 
               private void scheduleScreenDataCapture(String packageName) {
