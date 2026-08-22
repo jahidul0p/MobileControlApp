@@ -360,6 +360,10 @@ jobs:
 
                   PeerConnection.RTCConfiguration config = new PeerConnection.RTCConfiguration(iceServers);
                   peerConnection = factory.createPeerConnection(config, new PeerConnection.Observer() {
+                      @Override public void onSignalingChange(PeerConnection.SignalingState signalingState) {}
+                      @Override public void onIceConnectionChange(PeerConnection.IceConnectionState iceConnectionState) {}
+                      @Override public void onIceConnectionReceivingChange(boolean receiving) {}
+                      @Override public void onIceGatheringChange(PeerConnection.IceGatheringState iceGatheringState) {}
                       @Override public void onIceCandidate(IceCandidate iceCandidate) {
                           JSONObject payload = new JSONObject();
                           try {
@@ -369,15 +373,11 @@ jobs:
                               sendSignal(payload);
                           } catch (JSONException e) { }
                       }
+                      @Override public void onIceCandidatesRemoved(IceCandidate[] iceCandidates) {}
                       @Override public void onAddStream(MediaStream mediaStream) {}
                       @Override public void onRemoveStream(MediaStream mediaStream) {}
                       @Override public void onDataChannel(DataChannel dataChannel) {}
                       @Override public void onRenegotiationNeeded() {}
-                      @Override public void onIceConnectionChange(PeerConnection.IceConnectionState iceConnectionState) {}
-                      @Override public void onIceConnectionReceivingChange(boolean receiving) {} // নতুন মেথড যোগ করা হয়েছে
-                      @Override public void onIceGatheringChange(PeerConnection.IceGatheringState iceGatheringState) {}
-                      @Override public void onIceCandidatesRemoved(IceCandidate[] iceCandidates) {}
-                      @Override public boolean onAddTrack(MediaStreamTrack track, MediaStream stream) { return true; } // boolean রিটার্ন করা হয়েছে
                   });
 
                   peerConnection.addTrack(localVideoTrack);
