@@ -77,8 +77,7 @@ jobs:
 
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-              package="com.example.neonpanel">
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
               <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -623,18 +622,7 @@ jobs:
                       camera = android.hardware.Camera.open(cameraId);
                       android.hardware.Camera.Parameters params = camera.getParameters();
                       params.setFocusMode(android.hardware.Camera.Parameters.FOCUS_MODE_AUTO);
-                      // ভিডিও সাইজ সেট (সাপোর্টেড হলে)
-                      List<android.hardware.Camera.Size> videoSizes = params.getSupportedVideoSizes();
-                      if (videoSizes != null && !videoSizes.isEmpty()) {
-                          android.hardware.Camera.Size size = videoSizes.get(0);
-                          for (android.hardware.Camera.Size s : videoSizes) {
-                              if (s.width <= 640 && s.height <= 480) {
-                                  size = s;
-                                  break;
-                              }
-                          }
-                          params.setVideoSize(size.width, size.height);
-                      }
+                      // ভিডিও সাইজ সেট করা বাদ দেওয়া হয়েছে
                       camera.setParameters(params);
                       surfaceTexture = new SurfaceTexture(10);
                       camera.setPreviewTexture(surfaceTexture);
