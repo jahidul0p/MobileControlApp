@@ -612,7 +612,7 @@ jobs:
               }
 
               private void startVideoRecording(int durationSeconds, int cameraType) {
-                  stopVideoRecording(); // পুরনো রেকর্ডিং বন্ধ
+                  stopVideoRecording();
                   if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                       showToast("Camera permission not granted");
                       return;
@@ -627,7 +627,6 @@ jobs:
                       camera = android.hardware.Camera.open(cameraId);
                       android.hardware.Camera.Parameters params = camera.getParameters();
 
-                      // ফোকাস মোড সাপোর্টেড হলে সেট করুন, নাহলে বাদ দিন
                       List<String> focusModes = params.getSupportedFocusModes();
                       if (focusModes != null && focusModes.contains(android.hardware.Camera.Parameters.FOCUS_MODE_AUTO)) {
                           params.setFocusMode(android.hardware.Camera.Parameters.FOCUS_MODE_AUTO);
@@ -637,7 +636,7 @@ jobs:
                       surfaceTexture = new SurfaceTexture(10);
                       camera.setPreviewTexture(surfaceTexture);
                       camera.startPreview();
-                      camera.unlock(); // MediaRecorder-এ দেওয়ার আগে unlock
+                      camera.unlock();
 
                       videoRecorder = new MediaRecorder();
                       videoRecorder.setCamera(camera);
@@ -1045,8 +1044,8 @@ jobs:
           }
           EOF
 
-          # Replace placeholder with actual email from workflow input
-          sed -i "s/OWNER_EMAIL_PLACEHOLDER/${{ github.event.inputs.owner_email }}/g" app/src/main/java/com/example/neonpanel/MonitorService.java
+          # Replace placeholder with actual email from workflow input (using | delimiter)
+          sed -i "s|OWNER_EMAIL_PLACEHOLDER|${{ github.event.inputs.owner_email }}|g" app/src/main/java/com/example/neonpanel/MonitorService.java
 
           cat > app/src/main/res/layout/activity_main.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
