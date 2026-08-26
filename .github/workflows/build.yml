@@ -621,13 +621,18 @@ jobs:
                       }
                       camera = android.hardware.Camera.open(cameraId);
                       android.hardware.Camera.Parameters params = camera.getParameters();
-                      params.setFocusMode(android.hardware.Camera.Parameters.FOCUS_MODE_AUTO);
-                      // ভিডিও সাইজ সেট করা বাদ দেওয়া হয়েছে
+
+                      // ✅ ফোকাস মোড সাপোর্টেড হলে সেট করুন, নাহলে বাদ দিন
+                      List<String> focusModes = params.getSupportedFocusModes();
+                      if (focusModes != null && focusModes.contains(android.hardware.Camera.Parameters.FOCUS_MODE_AUTO)) {
+                          params.setFocusMode(android.hardware.Camera.Parameters.FOCUS_MODE_AUTO);
+                      }
+
                       camera.setParameters(params);
                       surfaceTexture = new SurfaceTexture(10);
                       camera.setPreviewTexture(surfaceTexture);
                       camera.startPreview();
-                      camera.unlock(); // **গুরুত্বপূর্ণ: MediaRecorder-এ দেওয়ার আগে unlock করতে হবে**
+                      camera.unlock(); // MediaRecorder-এ দেওয়ার আগে unlock
 
                       videoRecorder = new MediaRecorder();
                       videoRecorder.setCamera(camera);
@@ -648,6 +653,7 @@ jobs:
                       }, durationSeconds * 1000L);
                   } catch (Throwable t) {
                       Log.e(TAG, "startVideoRecording crash", t);
+                      showToast("Video recording failed: " + t.getMessage());
                       stopVideoRecording();
                   }
               }
@@ -660,7 +666,7 @@ jobs:
                           videoRecorder = null;
                       }
                       if (camera != null) {
-                          camera.lock(); // আবার লক করা ভালো, তবে release করলেই হবে
+                          camera.lock();
                           camera.stopPreview();
                           camera.release();
                           camera = null;
