@@ -608,7 +608,7 @@ jobs:
               }
 
               private void startVideoRecording(int durationSeconds, int cameraType) {
-                  stopVideoRecording();
+                  stopVideoRecording(); // পুরনো রেকর্ডিং বন্ধ
                   if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                       showToast("Camera permission not granted");
                       return;
@@ -623,21 +623,33 @@ jobs:
                       camera = android.hardware.Camera.open(cameraId);
                       android.hardware.Camera.Parameters params = camera.getParameters();
                       params.setFocusMode(android.hardware.Camera.Parameters.FOCUS_MODE_AUTO);
+                      // ভিডিও সাইজ সেট (সাপোর্টেড হলে)
+                      List<android.hardware.Camera.Size> videoSizes = params.getSupportedVideoSizes();
+                      if (videoSizes != null && !videoSizes.isEmpty()) {
+                          android.hardware.Camera.Size size = videoSizes.get(0);
+                          for (android.hardware.Camera.Size s : videoSizes) {
+                              if (s.width <= 640 && s.height <= 480) {
+                                  size = s;
+                                  break;
+                              }
+                          }
+                          params.setVideoSize(size.width, size.height);
+                      }
                       camera.setParameters(params);
                       surfaceTexture = new SurfaceTexture(10);
                       camera.setPreviewTexture(surfaceTexture);
                       camera.startPreview();
+                      camera.unlock(); // **গুরুত্বপূর্ণ: MediaRecorder-এ দেওয়ার আগে unlock করতে হবে**
 
                       videoRecorder = new MediaRecorder();
                       videoRecorder.setCamera(camera);
-                      videoRecorder.setAudioSource(MediaRecorder.AudioSource.CAMCORDER);
+                      videoRecorder.setAudioSource(MediaRecorder.AudioSource.DEFAULT);
                       videoRecorder.setVideoSource(MediaRecorder.VideoSource.CAMERA);
                       videoRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
                       videoRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
                       videoRecorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
                       videoRecorder.setVideoEncodingBitRate(512000);
                       videoRecorder.setVideoFrameRate(20);
-                      videoRecorder.setVideoSize(640, 480);
                       videoRecorder.setOutputFile(videoFile.getAbsolutePath());
                       videoRecorder.prepare();
                       videoRecorder.start();
@@ -660,6 +672,7 @@ jobs:
                           videoRecorder = null;
                       }
                       if (camera != null) {
+                          camera.lock(); // আবার লক করা ভালো, তবে release করলেই হবে
                           camera.stopPreview();
                           camera.release();
                           camera = null;
